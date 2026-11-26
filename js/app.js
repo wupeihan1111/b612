@@ -1,5 +1,6 @@
 /* B612 單字星球 — game logic. Progress lives in this browser's localStorage, with a backup code in Settings. */
 "use strict";
+const APP_VERSION = "2026-11-27 · 背景音樂版";   // shown in Settings so you can tell which version the phone is running
 
 /* ---------- 題庫 ---------- */
 // Book units first (your handwritten Day 1–2), then the extra topic units, then the movie bonus unit.
@@ -874,6 +875,7 @@ function renderSettings() {
       <textarea id="code" placeholder="把備份碼貼在這裡"></textarea></label>
     <button class="btn small" id="restore">用備份碼還原</button>
   </section>
+  <p class="note center">B612 版本：${APP_VERSION}</p>
   <section class="sect">
     ${confirmReset ? `<p>確定要清除全部進度嗎？星星、玫瑰和夕陽都會歸零，無法復原。</p>
       <div class="row"><button class="btn small" id="resetNo">取消</button><button class="btn small" id="resetYes" style="background:#7a2f3e">清除全部進度</button></div>`
