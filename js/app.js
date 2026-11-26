@@ -1,6 +1,6 @@
 /* B612 單字星球 — game logic. Progress lives in this browser's localStorage, with a backup code in Settings. */
 "use strict";
-const APP_VERSION = "2026-11-27 · 更新按鈕版";   // keep in sync with version.json   // shown in Settings so you can tell which version the phone is running
+const APP_VERSION = "2026-11-27 · 靜音開關修正版";   // keep in sync with version.json   // shown in Settings so you can tell which version the phone is running
 
 /* ---------- 題庫 ---------- */
 // Book units first (your handwritten Day 1–2), then the extra topic units, then the movie bonus unit.
@@ -248,7 +248,25 @@ function rebuildAudio() {
   try { waStop(); AC && AC.close() } catch (e) { }
   AC = null; BGM.waGain = null; BGM.waBuf = {}; audio(); musicSync();
 }
+/* iPhone's silent switch mutes Web Audio but not media playback. Keeping a silent <audio> loop running moves the
+   page into the "playback" audio session, so music and effects stay audible with the switch on (unmute trick). */
+let keepAlive = null;
+function silentWavUrl() {
+  const n = 8000, ab = new ArrayBuffer(44 + n), v = new DataView(ab), w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)) };
+  w(0, "RIFF"); v.setUint32(4, 36 + n, true); w(8, "WAVE"); w(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true); w(36, "data"); v.setUint32(40, n, true);
+  for (let i = 0; i < n; i++) v.setUint8(44 + i, 128);
+  return URL.createObjectURL(new Blob([ab], { type: "audio/wav" }));
+}
+function keepAudible() {
+  try {
+    if (navigator.audioSession) navigator.audioSession.type = "playback";
+    if (!keepAlive) { keepAlive = document.createElement("audio"); keepAlive.loop = true; keepAlive.setAttribute("playsinline", ""); keepAlive.src = silentWavUrl(); keepAlive.hidden = true; document.body.appendChild(keepAlive) }
+    if (keepAlive.paused) keepAlive.play().catch(() => { });
+  } catch (e) { }
+}
 function unlockAudio() {
+  keepAudible();
   const ac = audio(); if (!ac) return;
   audioUnlocked = true; musicSync();   // inside the tap, so the music element is allowed to start
   if (ac.state !== "running") ac.resume().then(() => { if (ac.state === "running") musicSync() }).catch(() => { }).finally(() => setTimeout(() => { if (AC === ac && ac.state !== "running") rebuildAudio() }, 400));
@@ -343,7 +361,8 @@ function musicStatus() {
   if (!S.settings.music) return "背景音樂已關閉";
   if (BGM.err) return BGM.err;
   const tag = BGM.engine === "wa" ? "（Web Audio）" : "（音樂播放器）";
-  if (BGM.engine === "wa" ? !!BGM.waNode : (BGM.el && !BGM.el.paused)) return "播放中 ♪ " + tag;
+  const eng = AC ? " · 引擎 " + AC.state + (keepAlive ? (keepAlive.paused ? " · 靜音保護未啟動" : " · 靜音保護開") : "") : "";
+  if (BGM.engine === "wa" ? !!BGM.waNode : (BGM.el && !BGM.el.paused)) return "播放中 ♪ " + tag + eng;
   if (BGM.waLoading) return "載入中⋯ " + tag;
   return (audioUnlocked ? "暫停中 " : "點一下畫面後開始 ") + tag + (AC ? " · 音效引擎：" + AC.state : "");
 }
@@ -991,7 +1010,7 @@ function renderSettings() {
     <div class="row" style="justify-content:flex-start;flex-wrap:wrap"><label class="btn small" for="mfile" style="display:inline-block;cursor:pointer">選擇手機裡的音樂檔</label>
       <input type="file" id="mfile" accept="audio/*" hidden>
       ${st.musicName ? `<button class="btn small" id="mdel">移除我的音樂</button>` : ""}</div>
-    <div class="row" style="justify-content:flex-start;gap:10px;flex-wrap:wrap"><button class="btn small" id="mtest">▶ 試播音樂</button><span class="note" id="mstat">${musicStatus()}</span></div>
+    <div class="row" style="justify-content:flex-start;gap:10px;flex-wrap:wrap"><button class="btn small" id="mtest">▶ 試播音樂</button><button class="btn small" id="stest">試聽嗶聲</button><span class="note" id="mstat">${musicStatus()}</span></div>
     <p class="note">音樂檔只存在這支手機的 B612 裡，不會上傳。要用買斷的歌（例如 iTunes 購買）或一般音樂檔；Apple Music、Spotify 的串流歌曲沒辦法選。</p>
   </section>
   <section class="sect">
@@ -1046,6 +1065,7 @@ function renderSettings() {
   const $ = id => document.getElementById(id);
   $("back").onclick = () => { confirmReset = false; go("home") };
   $("chkUpd").onclick = () => checkUpdate(true);
+  $("stest").onclick = () => { const was = st.sfx; st.sfx = true; blip(true); st.sfx = was; setTimeout(() => { const m = $("mstat"); if (m) m.textContent = musicStatus() }, 300) };
   $("mtest").onclick = () => {
     st.music = true; save(); audioUnlocked = true; BGM.err = ""; waStop(); musicSync();
     setTimeout(() => { const m = $("mstat"); if (m) m.textContent = musicStatus() }, 800);
