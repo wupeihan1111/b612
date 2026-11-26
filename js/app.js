@@ -111,7 +111,7 @@ function blip(ok) {
 }
 
 /* ---------- 像素圖 ---------- */
-const PAL = { h: "#f2c14e", H: "#c9962e", s: "#f6d2b0", e: "#2a2440", g: "#4f9a62", G: "#3a7a4c", y: "#f7dd5a", b: "#3b2f4a", r: "#e0556e", R: "#a83a52", l: "#6cbf7a", L: "#3f8a50", t: "#7a5236", v: "#9a7562", V: "#6e5246", x: "#6d6a7c", X: "#4d4a5c", d: "#2c2236", o: "#ff8a3d", f: "#e8833a", F: "#fff1dc", k: "#2a2440", w: "#ffffff", c: "#c9e6ff" };
+const PAL = { h: "#f2c14e", H: "#c9962e", s: "#f6d2b0", e: "#2a2440", g: "#4f9a62", G: "#3a7a4c", y: "#f7dd5a", b: "#3b2f4a", r: "#e0556e", R: "#a83a52", l: "#6cbf7a", L: "#3f8a50", t: "#7a5236", v: "#7a5568", V: "#553a4c", x: "#6d6a7c", X: "#4d4a5c", d: "#2c2236", o: "#ff8a3d", f: "#e8833a", F: "#fff1dc", k: "#2a2440", w: "#ffffff", c: "#c9e6ff" };
 const SPR = {
   prince: ["...hhhh...", "..hhhhhh..", ".hhhhhhhh.", ".hHhhhhHh.", "..sesses..", "..ssssss..", ".yyyyyyy..", "..gggggyyy", ".gggggggg.", ".gggggggg.", "..gggggg..", "..gg..gg..", "..gg..gg..", "..bb..bb.."],
   prince2: ["...hhhh...", "..hhhhhh..", ".hhhhhhhh.", ".hHhhhhHh.", "..sesses..", "..ssssss..", ".yyyyyyy..", "..gggggyy.", ".ggggggggy", ".gggggggg.", "..gggggg..", "..gg..gg..", "..gg..gg..", "..bb..bb.."],
@@ -130,11 +130,33 @@ const SPR = {
 function spr(ctx, rows, x, y, s = 1) { for (let j = 0; j < rows.length; j++)for (let i = 0; i < rows[j].length; i++) { const c = rows[j][i]; if (c === ".") continue; ctx.fillStyle = PAL[c]; ctx.fillRect(x + i * s, y + j * s, s, s) } }
 function seeded(n) { let x = n * 9301 + 49297; return () => { x = (x * 9301 + 49297) % 233280; return x / 233280 } }
 
-const W = 128, H = 96, CX = 64, CY = 104, R = 46;
-function surf(x) { return CY - Math.floor(Math.sqrt(Math.max(0, R * R - (x - CX) * (x - CX)))) }
+/* Side view, facing right. Two walking frames: legs apart / legs passing, scarf flapping behind. */
+SPR.walk1 = ["...hh.h...", "..hhhhhh..", ".hhhhhhhh.", "hhhhhhsss.", ".hhhhsses.", "..hhssss..", "yyyyyyyy..", "yy.gggggg.", "y..ggggg..", "...gggggg.", "..ggggggg.", "...g...g..", "..bb...bb."];
+SPR.walk2 = ["...hh.h...", "..hhhhhh..", ".hhhhhhhh.", "hhhhhhsss.", ".hhhhsses.", "..hhssss..", ".yyyyyyy..", "yyygggggg.", "...ggggg..", "...gggggg.", "..ggggggg.", "....g.g...", "....bbbb.."];
+SPR.roseDome = ["...ccccc...", "..c.....c..", ".c..r.r..c.", ".c.rrRrr.c.", ".c..rrr..c.", ".c...l...c.", ".c.ll.l..c.", ".c...ll..c.", ".c...l...c.", "ccccccccccc"];
+
+const sprCache = new Map();
+function sprCanvas(rows, flip) {
+  const key = rows.join("|") + (flip ? "<" : "");
+  if (sprCache.has(key)) return sprCache.get(key);
+  const c = document.createElement("canvas"); c.width = rows[0].length; c.height = rows.length;
+  spr(c.getContext("2d"), flip ? rows.map(r => r.split("").reverse().join("")) : rows, 0, 0);
+  sprCache.set(key, c); return c;
+}
+
+/* The whole little planet is visible; things on it sit at an angle (0 = top, clockwise) and turn with PHI. */
+const W = 112, H = 84, PX = 56, PY = 50, PR = 24;
+const PLACES = { v0: -0.55, v1: -0.95, v2: 2.3, rose: 0.6, baobab: [1.2, -1.5, 2.8, -2.4, 1.85, -3.0] };
+const CRATERS = [[9, 0.3], [16, -0.9], [12, 1.9], [19, 2.6], [7, -2.2], [18, -1.8], [14, 0.9]];
+const walker = { phi: 0, vel: 0, dist: 0, face: 1, dragging: false, talk: 0 };
+function polar(r, a) { return [PX + r * Math.sin(a), PY - r * Math.cos(a)] }
+function onPlanet(ctx, rows, ang, lift = 0) {
+  const c = sprCanvas(rows); ctx.save(); ctx.translate(PX, PY); ctx.rotate(ang);
+  ctx.drawImage(c, -Math.floor(c.width / 2), -PR - c.height + 1 - lift); ctx.restore();
+}
 function drawScene(cv, tick, opt) {
   const ctx = cv.getContext("2d"); ctx.imageSmoothingEnabled = false;
-  const sunset = opt.sunset;
+  const sunset = opt.sunset, phi = walker.phi;
   const bands = sunset ? ["#2b2f6b", "#4c3a78", "#8a4c7c", "#c8636d", "#ee8f5c", "#f6b766"] : ["#0d1129", "#11163a", "#151b45", "#1a2150", "#20285c", "#262f68"];
   const bh = Math.ceil(H / bands.length);
   for (let b = 0; b < bands.length; b++) {
@@ -142,51 +164,108 @@ function drawScene(cv, tick, opt) {
     if (b > 0) { ctx.fillStyle = bands[b - 1]; for (let x = 0; x < W; x += 2) { ctx.fillRect(x + (b % 2), b * bh, 1, 1); ctx.fillRect(x + ((b + 1) % 2), b * bh + 1, 1, 1) } }
   }
   const r1 = seeded(7);
-  for (let i = 0; i < 45; i++) { const x = Math.floor(r1() * W), y = Math.floor(r1() * (H - 36)); const tw = (Math.floor(tick / 3) + i) % 9 === 0; ctx.fillStyle = tw ? "#ffffff" : (sunset ? "rgba(255,230,200,.35)" : "rgba(200,205,255,.45)"); ctx.fillRect(x, y, 1, 1) }
+  for (let i = 0; i < 55; i++) { const x = Math.floor(r1() * W), y = Math.floor(r1() * H); const tw = (Math.floor(tick / 3) + i) % 9 === 0; ctx.fillStyle = tw ? "#ffffff" : (sunset ? "rgba(255,230,200,.35)" : "rgba(200,205,255,.45)"); ctx.fillRect(x, y, 1, 1) }
   const r2 = seeded(42);
   for (let i = 0; i < Math.min(opt.stars, 400); i++) {
-    const x = 4 + Math.floor(r2() * (W - 8)), y = 3 + Math.floor(r2() * 46); const on = (Math.floor(tick / 2) + i) % 7 !== 0;
+    let x = 4 + Math.floor(r2() * (W - 8)), y = 3 + Math.floor(r2() * (H - 6));
+    if (Math.hypot(x - PX, y - PY) < PR + 18) continue;
+    const on = (Math.floor(tick / 2) + i) % 7 !== 0;
     ctx.fillStyle = on ? "#ffe9a8" : "#f2c14e"; ctx.fillRect(x, y, 1, 1); ctx.fillRect(x - 1, y, 1, 1); ctx.fillRect(x + 1, y, 1, 1); ctx.fillRect(x, y - 1, 1, 1); ctx.fillRect(x, y + 1, 1, 1);
     if (on) { ctx.fillStyle = "#fff"; ctx.fillRect(x, y, 1, 1) }
   }
-  const sp = tick % 90; if (sp < 8) { ctx.fillStyle = "#fff"; for (let k = 0; k < 4; k++)ctx.fillRect(110 - sp * 5 + k * 2, 8 + sp * 2 - k, 1, 1) }
-  if (sunset) { ctx.fillStyle = "#ffd27a"; for (let y = -8; y <= 8; y++) { const hw = Math.floor(Math.sqrt(64 - y * y)); ctx.fillRect(104 - hw, 60 + y, hw * 2, 1) } }
-  for (let y = CY - R; y < H; y++) {
-    const hw = Math.floor(Math.sqrt(Math.max(0, R * R - (y - CY) * (y - CY))));
-    ctx.fillStyle = "#2a1f3a"; ctx.fillRect(CX - hw - 1, y, hw * 2 + 2, 1);
-    ctx.fillStyle = sunset ? "#d9a26a" : "#c49a68"; ctx.fillRect(CX - hw, y, hw * 2, 1);
-    ctx.fillStyle = sunset ? "#b07a52" : "#9c7650"; ctx.fillRect(CX + Math.floor(hw * 0.55), y, Math.ceil(hw * 0.45), 1);
+  const sp = tick % 90; if (sp < 8) { ctx.fillStyle = "#fff"; for (let k = 0; k < 4; k++)ctx.fillRect(104 - sp * 5 + k * 2, 6 + sp * 2 - k, 1, 1) }
+  if (sunset) { ctx.fillStyle = "#ffd27a"; for (let y = -9; y <= 9; y++) { const hw = Math.floor(Math.sqrt(81 - y * y)); ctx.fillRect(98 - hw, 70 + y, hw * 2, 1) } }
+  // planet body, light from upper left
+  for (let y = -PR - 1; y <= PR + 1; y++) {
+    const hw = Math.floor(Math.sqrt(Math.max(0, (PR + 1) * (PR + 1) - y * y)));
+    ctx.fillStyle = "#2a1f3a"; ctx.fillRect(PX - hw, PY + y, hw * 2 + 1, 1);
   }
-  ctx.fillStyle = "#9c7650";[[46, 80], [74, 86], [58, 90], [86, 76], [38, 88]].forEach(([x, y]) => { ctx.fillRect(x, y, 3, 1); ctx.fillRect(x - 1, y + 1, 5, 1) });
-  const bx = [26, 102, 50, 80, 32, 96];
-  opt.baobabs.slice(0, 6).forEach((od, i) => { const x = bx[i]; if (od > 2) spr(ctx, SPR.tree, x - 4, surf(x) - 6); else spr(ctx, SPR.sprout, x - 1, surf(x) - 2) });
-  const vx = [38, 50, 92];
+  for (let y = -PR; y <= PR; y++) {
+    const hw = Math.floor(Math.sqrt(Math.max(0, PR * PR - y * y)));
+    for (let x = -hw; x <= hw; x++) {
+      const d = Math.hypot(x + PR * 0.45, y + PR * 0.45) / PR;   // light from upper left, crescent shadow lower right
+      ctx.fillStyle = d > 1.2 ? (sunset ? "#a8724e" : "#8f6b4a") : d > 0.7 ? (sunset ? "#d29a64" : "#b8905f") : (sunset ? "#e8b67a" : "#d3ad74");
+      ctx.fillRect(PX + x, PY + y, 1, 1);
+    }
+  }
+  ctx.fillStyle = sunset ? "#9c6a48" : "#8c6646";
+  CRATERS.forEach(([r, a]) => { const [x, y] = polar(r, a + phi); ctx.fillRect(Math.round(x) - 1, Math.round(y), 3, 1); ctx.fillRect(Math.round(x), Math.round(y) - 1, 1, 1) });
+  // things on the planet
+  opt.baobabs.slice(0, 6).forEach((od, i) => onPlanet(ctx, od > 2 ? SPR.tree : SPR.sprout, PLACES.baobab[i] + phi));
   [0, 1, 2].forEach(i => {
-    const x = vx[i], y = surf(x) - 4; const dirty = !opt.done[i];
-    spr(ctx, i === 2 ? SPR.dead : (dirty && tick % 4 < 2 ? SPR.volHot : SPR.vol), x - 5, y);
-    if (dirty) for (let k = 0; k < 4; k++) { const p = (tick + k * 4) % 14; ctx.fillStyle = k % 2 ? "#8d8aa8" : "#b9b6cf"; ctx.fillRect(x + Math.round(Math.sin((p + k) / 3) * 2), y - 2 - p, 2, 2) }
+    const a = PLACES["v" + i] + phi, dirty = !opt.done[i];
+    onPlanet(ctx, i === 2 ? SPR.dead : (dirty && tick % 4 < 2 ? SPR.volHot : SPR.vol), a);
+    if (dirty) {
+      const [x, y] = polar(PR + 6, a);
+      for (let k = 0; k < 4; k++) { const p = (tick + k * 4) % 14; ctx.fillStyle = k % 2 ? "#8d8aa8" : "#b9b6cf"; ctx.fillRect(Math.round(x + Math.sin((p + k) / 3) * 2), Math.round(y - p), 2, 2) }
+    }
   });
-  const rx = 78, ry = surf(rx) - 6; const st = opt.streak;
-  spr(ctx, st === 0 ? SPR.wilt : st < 3 ? SPR.bud : SPR.rose, rx - 2, ry);
-  if (st >= 7) { ctx.fillStyle = "rgba(190,225,255,.6)"; for (let a = 0; a <= 20; a++) { const ang = Math.PI * a / 20; ctx.fillRect(rx + Math.round(Math.cos(ang) * 5), ry + 6 - Math.round(Math.sin(ang) * 9), 1, 1) } }
-  const px = 63, allDone = opt.done.every(Boolean);
-  const pr = allDone ? SPR.princeHappy : (tick % 6 < 3 ? SPR.prince : SPR.prince2);
-  spr(ctx, pr, px - 5, surf(px) - 13 - (opt.jump > 0 ? Math.round(Math.sin(opt.jump / 6 * Math.PI) * 4) : 0));
+  const st = opt.streak;
+  onPlanet(ctx, st >= 7 ? SPR.roseDome : st === 0 ? SPR.wilt : st < 3 ? SPR.bud : SPR.rose, PLACES.rose + phi);
+  // the prince always stands on top; side view while walking
+  const moving = walker.dragging || Math.abs(walker.vel) > 0.002;
+  let rows;
+  if (moving) rows = Math.floor(walker.dist / 0.09) % 2 ? SPR.walk2 : SPR.walk1;
+  else rows = opt.done.every(Boolean) ? SPR.princeHappy : (tick % 6 < 3 ? SPR.prince : SPR.prince2);
+  const c = sprCanvas(rows, moving && walker.face < 0);
+  const hop = opt.jump > 0 ? Math.round(Math.sin(opt.jump / 6 * Math.PI) * 4) : 0;
+  ctx.drawImage(c, PX - Math.floor(c.width / 2), PY - PR - c.height + 1 - hop);
 }
 function drawIcon(cv, rows, scale) { const ctx = cv.getContext("2d"); ctx.imageSmoothingEnabled = false; ctx.clearRect(0, 0, cv.width, cv.height); spr(ctx, rows, Math.floor((cv.width - rows[0].length * scale) / 2), Math.floor((cv.height - rows.length * scale) / 2), scale) }
 function drawJourney(cv, frac, tick) {
-  const ctx = cv.getContext("2d"), w = 128, h = 18; ctx.imageSmoothingEnabled = false;
+  const ctx = cv.getContext("2d"), w = 128, h = 24; ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = "#0f1430"; ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = "#3a4277"; for (let x = 8; x < 120; x += 3) ctx.fillRect(x, 11, 1, 1);
+  ctx.fillStyle = "#3a4277"; for (let x = 8; x < 120; x += 3) ctx.fillRect(x, 19, 1, 1);
   const cols = ["#c49a68", "#b37acb", "#e0556e", "#6d8bd6", "#e8c35a", "#ff8a3d", "#6cbf7a", "#4aa3df"];
   PLANETS.forEach((p, i) => {
-    const x = 8 + Math.round(i * 112 / (PLANETS.length - 1)), r = i === 7 ? 4 : i === 0 ? 3 : 2;
-    const reached = frac >= i / (PLANETS.length - 1) - 1e-9;
-    ctx.fillStyle = reached ? cols[i] : "#3a4277";
-    for (let y = -r; y <= r; y++) { const hw = Math.floor(Math.sqrt(r * r - y * y + .5)); ctx.fillRect(x - hw, 11 + y, hw * 2 + 1, 1) }
+    const x = 8 + Math.round(i * 112 / (PLANETS.length - 1)), r = i === 7 ? 3 : 2;
+    ctx.fillStyle = frac >= i / (PLANETS.length - 1) - 1e-9 ? cols[i] : "#3a4277";
+    for (let y = -r; y <= r; y++) { const hw = Math.floor(Math.sqrt(r * r - y * y + .5)); ctx.fillRect(x - hw, 19 + y, hw * 2 + 1, 1) }
   });
   const mx = 8 + Math.round(Math.min(1, frac) * 112);
-  spr(ctx, SPR.mini, mx - 2, 0 + (tick % 4 < 2 ? 0 : 1));
+  spr(ctx, Math.floor(tick / 2) % 2 ? SPR.walk2 : SPR.walk1, Math.max(0, Math.min(w - 10, mx - 5)), 3);
+}
+
+/* The prince talks in chiptune babble, not the word-reading voice. */
+const PRINCE_LINES = ["你好呀！", "今天也要清火山喔", "我的玫瑰在等我", "Bonjour!", "你看，星星又多一顆了", "往右邊走走看？", "猴麵包樹要趁小拔掉", "我們一起去地球吧", "嘿嘿", "今天想看夕陽"];
+function babble(n) {
+  if (!S.settings.sfx) return;
+  try {
+    AC = AC || new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === "suspended") AC.resume();
+    const t0 = AC.currentTime, base = 900 + Math.random() * 200;
+    for (let i = 0; i < Math.min(n, 9); i++) {
+      const o = AC.createOscillator(), g = AC.createGain(), t = t0 + i * 0.075;
+      o.type = "triangle"; o.frequency.setValueAtTime(base * (0.85 + Math.random() * 0.45), t);
+      o.frequency.exponentialRampToValueAtTime(base * 1.3, t + 0.05);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.09, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+      o.connect(g).connect(AC.destination); o.start(t); o.stop(t + 0.07);
+    }
+  } catch (e) { }
+}
+function princeTalk(bubble) {
+  const line = PRINCE_LINES[Math.floor(Math.random() * PRINCE_LINES.length)];
+  bubble.textContent = line; bubble.hidden = false; jump = 6; babble(line.length);
+  clearTimeout(princeTalk.t); princeTalk.t = setTimeout(() => bubble.hidden = true, 2200);
+}
+function bindWalk(cv, bubble) {
+  let sx = 0, lx = 0, st = 0, moved = 0;
+  cv.addEventListener("pointerdown", e => { walker.dragging = true; sx = lx = e.clientX; st = performance.now(); moved = 0; cv.setPointerCapture?.(e.pointerId) });
+  cv.addEventListener("pointermove", e => {
+    if (!walker.dragging) return;
+    const dx = e.clientX - lx; lx = e.clientX; moved += Math.abs(dx);
+    if (!dx) return;
+    const k = 4 / cv.clientWidth;                 // a full swipe across turns the planet about 4 radians
+    walker.vel = -dx * k; walker.phi += walker.vel; walker.dist += Math.abs(walker.vel); walker.face = dx > 0 ? 1 : -1;
+  });
+  const end = () => {
+    if (!walker.dragging) return; walker.dragging = false;
+    if (moved < 6 && performance.now() - st < 400) { walker.vel = 0; princeTalk(bubble) }
+  };
+  cv.addEventListener("pointerup", end); cv.addEventListener("pointercancel", end);
+  cv.addEventListener("keydown", e => {
+    if (e.key === "ArrowRight" || e.key === "ArrowLeft") { e.preventDefault(); const d = e.key === "ArrowRight" ? 1 : -1; walker.face = d; walker.vel = -d * 0.06 }
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); princeTalk(bubble) }
+  });
 }
 
 /* ---------- 畫面 ---------- */
@@ -205,7 +284,14 @@ function sceneOpts(sunset) {
 function startAnim(cv, sunset, journey) {
   let last = 0; const total = ALL().length || 1;
   const frame = () => { drawScene(cv, tick, sceneOpts(sunset)); if (journey) drawJourney(journey, seenCount() / total, tick) };
-  const loop = ts => { if (ts - last > 125) { tick++; if (jump > 0) jump--; last = ts; frame() } anim = requestAnimationFrame(loop) };
+  const loop = ts => {
+    const moving = walker.dragging || Math.abs(walker.vel) > 0.002;
+    if (!walker.dragging && moving) { walker.phi += walker.vel; walker.dist += Math.abs(walker.vel); walker.vel *= 0.93 }
+    else if (!walker.dragging) walker.vel = 0;
+    if (ts - last > 125) { tick++; if (jump > 0) jump--; last = ts; frame() }
+    else if (moving) drawScene(cv, tick, sceneOpts(sunset));
+    anim = requestAnimationFrame(loop);
+  };
   frame();
   if (!matchMedia("(prefers-reduced-motion: reduce)").matches) anim = requestAnimationFrame(loop);
 }
@@ -229,17 +315,21 @@ function renderHome() {
     { t: "活火山 · 第二座", s: T.v2.length ? `新單字 ${T.v2.length} 個 · 約 5 分鐘` : "新單字都遇見過了，改成隨機複習", lock: !T.done[0] },
     { t: "死火山", s: due ? `複習到期單字 ${Math.min(due, 30)} 個` : "今天學過的字再考一次", lock: !anySeen },
   ];
-  const line = allDone ? "今天的三座火山都清乾淨了。明天見！" : LINES[today() % LINES.length];
+  const line = allDone ? "三座火山都清好了，B612 現在是夕陽時間。明天見！" : LINES[today() % LINES.length];
   const showInstall = !isStandalone() && !S.installHidden;
   app.innerHTML = `
   <header class="top">
     <div class="logo">B612<small>單字星球 · ${esc(currentDeck())}</small></div>
     <div class="count">距離多益 1/9<b>${daysLeft()} 天</b></div>
   </header>
-  <canvas class="scene" id="scene" width="${W}" height="${H}" role="img" aria-label="小王子站在 B612 星球上，旁邊有玫瑰、三座火山${due ? `和 ${due} 棵猴麵包樹` : ""}，天上有 ${nStars} 顆點亮的星星"></canvas>
+  <div class="stage">
+    <canvas class="scene" id="scene" width="${W}" height="${H}" tabindex="0" role="img" aria-label="B612 星球：小王子、玫瑰、三座火山${due ? `和 ${due} 棵猴麵包樹` : ""}，天上有 ${nStars} 顆點亮的星星。左右滑動可以繞著星球走，點一下小王子會說話"></canvas>
+    <p class="bubble" id="bubble" hidden></p>
+    <span class="hint">← 左右滑動繞星球 →</span>
+  </div>
   <p class="line">${esc(line)}</p>
   <div class="journey">
-    <canvas id="journey" width="128" height="18" aria-hidden="true"></canvas>
+    <canvas id="journey" width="128" height="24" aria-hidden="true"></canvas>
     <div class="lbl"><span>B612</span><span>已遇見 ${seenCount()} / ${total} 字</span><span>地球（考場）</span></div>
   </div>
   <div class="chips">
@@ -270,8 +360,8 @@ function renderHome() {
     <button class="btn" data-go="settings">設定</button>
   </nav>`;
   const cv = document.getElementById("scene");
-  startAnim(cv, false, document.getElementById("journey"));
-  cv.onclick = () => { jump = 6; speak("Hello!") };
+  startAnim(cv, allDone, document.getElementById("journey"));
+  bindWalk(cv, document.getElementById("bubble"));
   app.querySelectorAll("[data-icon]").forEach(c => { const i = +c.dataset.icon; drawIcon(c, i === 3 ? SPR.tree : i === 2 ? SPR.dead : SPR.volHot, 2) });
   app.querySelectorAll("[data-vol]").forEach(b => b.onclick = () => startSession(+b.dataset.vol));
   app.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
