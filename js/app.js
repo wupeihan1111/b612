@@ -1,6 +1,6 @@
 /* B612 單字星球 — game logic. Progress lives in this browser's localStorage, with a backup code in Settings. */
 "use strict";
-const APP_VERSION = "2026-11-27 · 同步合併版";   // shown in Settings so you can tell which version the phone is running
+const APP_VERSION = "2026-11-27 · 主畫面音樂版";   // shown in Settings so you can tell which version the phone is running
 
 /* ---------- 題庫 ---------- */
 // Book units first (your handwritten Day 1–2), then the extra topic units, then the movie bonus unit.
@@ -245,8 +245,8 @@ function audio() {
 let audioUnlocked = false;
 function rebuildAudio() {
   // iPhone sometimes leaves the audio engine stuck "interrupted" after switching apps; start a fresh one.
-  try { AC && AC.close() } catch (e) { }
-  AC = null; audio();
+  try { waStop(); AC && AC.close() } catch (e) { }
+  AC = null; BGM.waGain = null; BGM.waBuf = {}; audio(); musicSync();
 }
 function unlockAudio() {
   const ac = audio(); if (!ac) return;
@@ -287,32 +287,70 @@ const SONG = [   // [bass, chord tones, melody [step, midi, length in eighths]] 
 const BGM = { el: null, chipUrl: ["audio/b612-waltz.m4a", "audio/b612-waltz-night.m4a"], blob: null, customUrl: null, night: false, ducked: false, err: "" };
 function customReady() { return S.settings.musicSrc === "custom" && BGM.blob }
 function musicWanted() { return S.settings.music && audioUnlocked && !document.hidden && view !== "learn" && view !== "quiz" }
-function musicSync() {
-  BGM.night = !!(S.today && skyStage() === 3);
+/* Two ways to play: a hidden <audio> element (Safari), or a looping Web Audio buffer on the same engine as the
+   sound effects. iPhone home-screen apps often refuse the <audio> element ("NotAllowedError") while the effects play
+   fine, so the home-screen app uses Web Audio, and any other browser switches to it after one refusal. */
+BGM.engine = isStandalone() ? "wa" : "media"; BGM.waBuf = {}; BGM.waNode = null; BGM.waGain = null; BGM.waLoading = null;
+function waLoad(url) {
+  if (BGM.waBuf[url]) return Promise.resolve(BGM.waBuf[url]);
+  return fetch(url).then(r => r.arrayBuffer()).then(ab => new Promise((res, rej) => audio().decodeAudioData(ab, res, rej))).then(buf => (BGM.waBuf[url] = buf));
+}
+function waStop() { try { BGM.waNode && BGM.waNode.stop() } catch (e) { } BGM.waNode = null }
+function waPlay(url) {
+  const ac = audio(); if (!ac) { BGM.err = "這個瀏覽器不支援 Web Audio"; return }
+  if (!BGM.waGain) { BGM.waGain = ac.createGain(); BGM.waGain.connect(ac.destination) }
+  BGM.waGain.gain.value = Math.min(1, S.settings.musicVol * (BGM.ducked ? 0.3 : 1));
+  if (BGM.waNode && BGM.waNode._url === url) return;
+  if (BGM.waLoading === url) return;
+  BGM.waLoading = url;
+  waLoad(url).then(buf => {
+    BGM.waLoading = null;
+    if (!musicWanted() || BGM.engine !== "wa") return;
+    waStop();
+    const n = ac.createBufferSource(); n.buffer = buf; n.loop = true; n.connect(BGM.waGain); n.start(); n._url = url;
+    BGM.waNode = n; BGM.err = "";
+  }).catch(e => { BGM.waLoading = null; BGM.err = "音樂檔讀取失敗：" + (e && (e.message || e.name) || "未知") });
+}
+function mediaEl() {
   if (!BGM.el) {
     BGM.el = document.createElement("audio"); BGM.el.loop = true; BGM.el.preload = "auto";
     BGM.el.setAttribute("playsinline", ""); BGM.el.setAttribute("webkit-playsinline", ""); BGM.el.hidden = true;
-    BGM.el.addEventListener("error", () => { BGM.err = "音樂檔載入失敗（錯誤碼 " + (BGM.el.error ? BGM.el.error.code : "?") + "）" });
+    BGM.el.addEventListener("error", () => { if (BGM.engine === "media") BGM.err = "音樂檔載入失敗（錯誤碼 " + (BGM.el.error ? BGM.el.error.code : "?") + "）" });
     BGM.el.addEventListener("playing", () => { BGM.err = "" });
     document.body.appendChild(BGM.el);
   }
-  const el = BGM.el;
+  return BGM.el;
+}
+function musicSync() {
+  BGM.night = !!(S.today && skyStage() === 3);
   if (customReady() && !BGM.customUrl) BGM.customUrl = URL.createObjectURL(BGM.blob);
   const src = customReady() ? BGM.customUrl : (BGM.chipUrl[BGM.night ? 1 : 0] || BGM.chipUrl[0]);
-  if (musicWanted() && src) {
-    if (el.dataset.src !== src) { el.src = src; el.dataset.src = src }
-    el.volume = Math.min(1, S.settings.musicVol * (BGM.ducked ? 0.3 : 1));
-    if (el.paused) { const p = el.play(); if (p) p.catch(e => { BGM.err = "播放被擋下：" + (e && e.name || "未知") }) }
-  } else if (!el.paused) el.pause();
+  const want = musicWanted() && src;
+  if (BGM.engine === "wa") {
+    if (BGM.el && !BGM.el.paused) BGM.el.pause();
+    if (want) waPlay(src); else waStop();
+  } else {
+    const el = mediaEl();
+    if (want) {
+      if (el.dataset.src !== src) { el.src = src; el.dataset.src = src }
+      el.volume = Math.min(1, S.settings.musicVol * (BGM.ducked ? 0.3 : 1));
+      if (el.paused) { const p = el.play(); if (p) p.catch(e => { if (e && e.name === "NotAllowedError") { BGM.engine = "wa"; BGM.err = ""; if (audioUnlocked) waPlay(src) } else BGM.err = "播放失敗：" + (e && e.name || "未知") }) }
+    } else if (!el.paused) el.pause();
+  }
   const mb = document.getElementById("mbtn"); if (mb) { mb.classList.toggle("off", !S.settings.music); mb.setAttribute("aria-pressed", String(S.settings.music)) }
 }
 function musicStatus() {
   if (!S.settings.music) return "背景音樂已關閉";
   if (BGM.err) return BGM.err;
-  if (BGM.el && !BGM.el.paused) return "播放中 ♪";
-  return audioUnlocked ? "暫停中" : "點一下畫面後開始";
+  const tag = BGM.engine === "wa" ? "（Web Audio）" : "（音樂播放器）";
+  if (BGM.engine === "wa" ? !!BGM.waNode : (BGM.el && !BGM.el.paused)) return "播放中 ♪ " + tag;
+  if (BGM.waLoading) return "載入中⋯ " + tag;
+  return (audioUnlocked ? "暫停中 " : "點一下畫面後開始 ") + tag + (AC ? " · 音效引擎：" + AC.state : "");
 }
-function musicDuck(on) { BGM.ducked = on; if (BGM.el) BGM.el.volume = Math.min(1, S.settings.musicVol * (on ? 0.3 : 1)) }
+function musicDuck(on) {
+  BGM.ducked = on; const v = Math.min(1, S.settings.musicVol * (on ? 0.3 : 1));
+  if (BGM.el) BGM.el.volume = v; if (BGM.waGain && AC) BGM.waGain.gain.setTargetAtTime(v, AC.currentTime, 0.1);
+}
 function idb() { return new Promise((res, rej) => { const r = indexedDB.open("b612", 1); r.onupgradeneeded = () => r.result.createObjectStore("files"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) }) }
 function idbDo(mode, fn) { return idb().then(db => new Promise((res, rej) => { const q = fn(db.transaction("files", mode).objectStore("files")); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error) })) }
 if (S.settings.musicName) idbDo("readonly", st => st.get("bgm")).then(b => { if (b) { BGM.blob = b; musicSync() } }).catch(() => { });
@@ -1005,8 +1043,7 @@ function renderSettings() {
   const $ = id => document.getElementById(id);
   $("back").onclick = () => { confirmReset = false; go("home") };
   $("mtest").onclick = () => {
-    st.music = true; save(); audioUnlocked = true; musicSync();
-    const el = BGM.el; if (el && el.paused) el.play().catch(e => { BGM.err = "播放被擋下：" + (e && e.name || "未知") });
+    st.music = true; save(); audioUnlocked = true; BGM.err = ""; waStop(); musicSync();
     setTimeout(() => { const m = $("mstat"); if (m) m.textContent = musicStatus() }, 800);
   };
   $("mus").onchange = e => { st.music = e.target.checked; save(); unlockAudio(); musicSync() };
