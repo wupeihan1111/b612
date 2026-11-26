@@ -1,16 +1,16 @@
 /* B612 單字題庫
    每個 deck 是一個單元（之後對應 Hackers 的 Day 1–30）。
    每個單字：[英文, 詞性, 中文, 英文例句, 例句翻譯, 記憶小技巧 或 null, 電影/歌曲記憶句 或 null]
-   記憶句格式：{src:"英文片名/歌名", zh:"中文片名（可留空）", note:"為什麼跟這個字有關"} */
+   記憶句格式：{src:"英文片名/歌名", zh:"中文片名（可留空）", q:"經典對白（可省略）", note:"為什麼跟這個字有關"} */
 window.B612_DECKS = [
  {id:"d0", title:"試玩單字", words:[
  ["reason","n.","理由；原因","The main reason for the delay was bad weather.","延誤的主要原因是天氣不好。",null,{src:"13 Reasons Why",zh:"漢娜的遺言（影集）",note:"劇名直譯就是「13 個理由」。reason 後面常接 why 或 for。"}],
  ["pursuit","n.","追求","She left the bank in pursuit of a career in design.","她離開銀行，去追求設計的職涯。",null,{src:"The Pursuit of Happyness",zh:"當幸福來敲門",note:"片名就是「追求幸福」。in pursuit of = 為了追求⋯"}],
- ["mission","n.","任務；使命","Our mission is to make travel easier for everyone.","我們的使命是讓每個人旅行更輕鬆。",null,{src:"Mission: Impossible",zh:"不可能的任務",note:"阿湯哥每集都在出「任務」。公司的 mission statement = 企業使命宣言。"}],
+ ["mission","n.","任務；使命","Our mission is to make travel easier for everyone.","我們的使命是讓每個人旅行更輕鬆。",null,{src:"Mission: Impossible",zh:"不可能的任務",q:"Your mission, should you choose to accept it…",note:"每集開頭交代任務的經典台詞：「你的任務，如果你選擇接受的話⋯」。公司的 mission statement = 企業使命宣言。"}],
  ["negotiate","v.","協商；談判","We need to negotiate a lower price with the supplier.","我們需要跟供應商協商降價。",null,{src:"The Negotiator",zh:"王牌對王牌",note:"片名就是「談判專家」，negotiate + -or = 做這件事的人。"}],
  ["candidate","n.","應徵者；候選人","Three candidates were invited to a second interview.","三位應徵者被邀請參加第二次面試。",null,{src:"The Manchurian Candidate",zh:"",note:"片名裡的 candidate 是「候選人」。多益裡多半是「應徵者」。"}],
  ["employee","n.","員工","All employees must wear their ID badges.","所有員工都必須配戴識別證。",null,{src:"Employee of the Month",zh:"",note:"片名＝「本月最佳員工」，很多店家牆上都有這個獎。"}],
- ["client","n.","客戶","Our client asked for a revised plan by Friday.","客戶要求在週五前拿到修改後的計畫。",null,{src:"The Client",zh:"",note:"律師片，片名就是「委託人」。在多益裡＝付錢給你的客戶。"}],
+ ["client","n.","客戶","Our client asked for a revised plan by Friday.","客戶要求在週五前拿到修改後的計畫。",null,{src:"Jerry Maguire",zh:"征服情海",q:"Help me help you.",note:"經紀人傑瑞對他唯一的客戶大喊：「幫我，讓我幫你！」對 client 就是要這樣。"}],
  ["replace","v.","取代；更換","The old printer will be replaced next week.","舊印表機下週會被換掉。",null,{src:"Irreplaceable（Beyoncé）",zh:"碧昂絲的歌",note:"ir-（不）+ replace + -able（可以）＝無法被取代的。"}],
  ["merchandise","n.","商品；貨物","All merchandise can be returned within 30 days.","所有商品都可在 30 天內退貨。",null,{src:"Spaceballs",zh:"星際炮彈（喜劇電影）",note:"片中導師大喊 \"Merchandising!\" 狂賣周邊商品的那一幕很有名。"}],
  ["proposal","n.","提案；求婚","The board approved the proposal for a new office.","董事會通過了新辦公室的提案。",null,{src:"The Proposal",zh:"愛情限時簽",note:"電影裡是「求婚」，多益裡幾乎都是「企劃提案」。"}],
@@ -36,7 +36,7 @@ window.B612_DECKS = [
  ["revenue","n.","營收","Revenue rose by 10 percent this quarter.","本季營收成長了 10%。","re（回）+ venue（來）＝回流進公司的錢",null],
  ["budget","n.","預算","The project is over budget.","這個專案超出預算了。","over budget 超支 / under budget 低於預算",null],
  ["estimate","n./v.","估計；估價單","Can you give me an estimate for the repairs?","可以給我一份修理的估價嗎？","estimate = 先「估」一個數字，跟 estimated time 一起記",null],
- ["contract","n.","合約","Both sides signed the contract yesterday.","雙方昨天簽了合約。","con（一起）+ tract（拉）＝把兩方拉在一起的文件",null],
+ ["contract","n.","合約","Both sides signed the contract yesterday.","雙方昨天簽了合約。","con（一起）+ tract（拉）＝把兩方拉在一起的文件",{src:"Jerry Maguire",zh:"征服情海",q:"Show me the money!",note:"球員要經紀人幫他談一份好「合約」時狂喊的名句：「讓我看到錢！」"}],
  ["colleague","n.","同事","I'm having lunch with a colleague.","我要和一位同事吃午餐。","col（一起）+ league（聯盟）＝同一隊的人",null],
  ["headquarters","n.","總部","Our headquarters are located in Taipei.","我們的總部位於台北。","head（頭）+ quarters（住處）＝公司的頭在哪裡，常縮寫成 HQ",null],
  ["branch","n.","分公司；分店","The bank opened a new branch downtown.","銀行在市中心開了一間新分行。","原意是「樹枝」：從總部長出去的枝＝分公司",null],

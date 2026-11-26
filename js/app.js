@@ -502,7 +502,7 @@ function answer(i) {
   document.getElementById("cont").onclick = nextQ;
   document.getElementById("reveal").scrollIntoView({ behavior: "smooth", block: "start" });
 }
-function hookHtml(w) { const h = w.hook; return `<div class="hook"><span class="lab">記憶句 · 頑固單字解鎖</span><span class="src" lang="en">${esc(h.src)}</span>${h.zh ? `<span class="note">${esc(h.zh)}</span>` : ""}<span>${esc(h.note)}</span></div>` }
+function hookHtml(w) { const h = w.hook; return `<div class="hook"><span class="lab">記憶句 · 頑固單字解鎖</span>${h.q ? `<p class="ex" lang="en">“${esc(h.q)}”</p><span class="note" lang="en">— ${esc(h.src)}${h.zh ? `（${esc(h.zh)}）` : ""}</span>` : `<span class="src" lang="en">${esc(h.src)}</span>${h.zh ? `<span class="note">${esc(h.zh)}</span>` : ""}`}<span>${esc(h.note)}</span></div>` }
 function finishSession() {
   const T = S.today, t = today();
   if (SES.kind < 3) T.done[SES.kind] = true;
