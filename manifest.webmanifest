@@ -1,0 +1,17 @@
+{
+  "name": "B612 單字星球",
+  "short_name": "B612",
+  "description": "小王子主題的像素風多益單字遊戲",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#121733",
+  "theme_color": "#121733",
+  "lang": "zh-Hant",
+  "icons": [
+    {"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
+    {"src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}
