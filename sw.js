@@ -1,5 +1,5 @@
 /* Offline support. Network first so a new deploy shows up right away; falls back to the cached copy when offline. */
-const CACHE = "b612-v14";
+const CACHE = "b612-v15";
 const SHELL = ["./", "./index.html", "./css/style.css", "./js/app.js", "./data/words.js", "./data/days03-10.js", "./config.js", "./audio/b612-waltz.m4a", "./audio/b612-waltz-night.m4a", "./manifest.webmanifest", "./icons/icon-192.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())) });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())) });

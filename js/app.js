@@ -1,6 +1,6 @@
 /* B612 單字星球 — game logic. Progress lives in this browser's localStorage, with a backup code in Settings. */
 "use strict";
-const APP_VERSION = "2026-11-27 · 聲音檢查版";   // keep in sync with version.json   // shown in Settings so you can tell which version the phone is running
+const APP_VERSION = "2026-11-27 · 聲音檢查 2";   // keep in sync with version.json   // shown in Settings so you can tell which version the phone is running
 
 /* ---------- 題庫 ---------- */
 // Book units first (your handwritten Day 1–2), then the extra topic units, then the movie bonus unit.
@@ -237,7 +237,6 @@ document.addEventListener("pointerdown", () => {
    goes to the background, and mutes it with the silent switch, so: unlock on every tap, resume before each sound,
    and ask for a "playback" audio session where Safari supports it. */
 let AC = null;
-try { if (navigator.audioSession) navigator.audioSession.type = "playback" } catch (e) { }
 function audio() {
   try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); if (AC.state !== "running") AC.resume().catch(() => { }) } catch (e) { }
   return AC;
@@ -260,7 +259,7 @@ function silentWavUrl() {
 }
 function keepAudible() {
   try {
-    if (navigator.audioSession) navigator.audioSession.type = "playback";
+    if (isStandalone()) return;   // in the home-screen app this trick is a suspect for total silence, so it stays off there
     if (!keepAlive) { keepAlive = document.createElement("audio"); keepAlive.loop = true; keepAlive.setAttribute("playsinline", ""); keepAlive.src = silentWavUrl(); keepAlive.hidden = true; document.body.appendChild(keepAlive) }
     if (keepAlive.paused) keepAlive.play().catch(() => { });
   } catch (e) { }
@@ -1015,11 +1014,9 @@ function renderSettings() {
   </section>
   <section class="sect">
     <h3>聲音檢查</h3>
-    <p class="note">三個按鈕各按一次，告訴我哪幾個<b>聽得到</b>。每個只會響 3 秒。</p>
+    <p class="note">從上到下各按一次，每個只響 2 秒。告訴我<b>哪幾號有聲音</b>就好。</p>
     <div class="list" style="gap:8px">
-      <div class="row"><button class="btn small" id="t1">測試 1：嗶聲</button><span class="note" id="r1"></span></div>
-      <div class="row"><button class="btn small" id="t2">測試 2：音樂（Web Audio）</button><span class="note" id="r2"></span></div>
-      <div class="row"><button class="btn small" id="t3">測試 3：音樂（播放器）</button><span class="note" id="r3"></span></div>
+      ${[["A", "嗶聲 · 預設模式"], ["B", "嗶聲 · 播放模式"], ["C", "嗶聲 · 環境音模式"], ["D", "音樂檔 · 播放器"], ["E", "音樂檔 · Web Audio"]].map(([k, n]) => `<div class="row"><button class="btn small" data-t="${k}">${k}. ${n}</button><span class="note" id="r${k}"></span></div>`).join("")}
     </div>
     <p class="note" id="diag"></p>
   </section>
@@ -1075,31 +1072,32 @@ function renderSettings() {
   const $ = id => document.getElementById(id);
   $("back").onclick = () => { confirmReset = false; go("home") };
   $("chkUpd").onclick = () => checkUpdate(true);
-  const diag = () => { $("diag").textContent = `主畫面模式：${isStandalone() ? "是" : "否"} · 引擎：${AC ? AC.state : "未建立"} · 取樣率：${AC ? AC.sampleRate : "-"} · 音訊模式：${navigator.audioSession ? navigator.audioSession.type : "不支援"} · 靜音保護：${keepAlive ? (keepAlive.paused ? "沒在跑" : "有在跑") : "未建立"}` };
+  const diag = () => { $("diag").textContent = `主畫面模式：${isStandalone() ? "是" : "否"} · 音訊模式：${navigator.audioSession ? navigator.audioSession.type : "不支援"} · 主引擎：${AC ? AC.state : "未建立"}` };
   diag();
-  $("t1").onclick = () => {
-    const ac = audio(); const before = ac ? ac.state : "無";
-    (ac.state === "running" ? Promise.resolve() : ac.resume()).catch(() => { }).then(() => {
-      const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime + 0.02;
-      o.type = "square"; o.frequency.value = 660; g.gain.setValueAtTime(0.08, t); g.gain.setValueAtTime(0.0001, t + 3);
-      o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 3);
-      $("r1").textContent = `已送出（引擎 ${before} → ${ac.state}）`; diag();
-    });
+  // Each test builds its own fresh audio engine inside the tap, under a different iPhone audio-session mode.
+  const setMode = m => { try { if (navigator.audioSession) navigator.audioSession.type = m } catch (e) { } };
+  const beep = (mode, k) => {
+    setMode(mode);
+    try {
+      const ac = new (window.AudioContext || window.webkitAudioContext)();
+      const go = () => { const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime + 0.02; o.type = "square"; o.frequency.value = 660; g.gain.setValueAtTime(0.1, t); g.gain.setValueAtTime(0.0001, t + 2); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 2); $("r" + k).textContent = "引擎 " + ac.state; setTimeout(() => { ac.close(); setMode("auto"); diag() }, 2300) };
+      ac.state === "running" ? go() : ac.resume().then(go, e => { $("r" + k).textContent = "啟動失敗 " + e.name });
+    } catch (e) { $("r" + k).textContent = "錯誤 " + e.name }
   };
-  $("t2").onclick = () => {
-    const ac = audio();
-    (ac.state === "running" ? Promise.resolve() : ac.resume()).catch(() => { })
-      .then(() => waLoad(BGM.chipUrl[0]))
-      .then(buf => { const n = ac.createBufferSource(), g = ac.createGain(); g.gain.value = 0.6; n.buffer = buf; n.connect(g).connect(ac.destination); n.start(); n.stop(ac.currentTime + 3); $("r2").textContent = `已送出（引擎 ${ac.state}）`; diag() })
-      .catch(e => { $("r2").textContent = "失敗：" + (e && (e.name || e.message)) });
-  };
-  $("t3").onclick = () => {
-    const a = new Audio(BGM.chipUrl[0]); a.setAttribute("playsinline", "");
-    const p = a.play();
-    (p || Promise.resolve()).then(() => { $("r3").textContent = "已開始播放"; setTimeout(() => a.pause(), 3000) })
-      .catch(e => { $("r3").textContent = "被擋下：" + (e && e.name) });
-    diag();
-  };
+  app.querySelectorAll("[data-t]").forEach(b => b.onclick = () => {
+    const k = b.dataset.t;
+    if (k === "A") beep("auto", k);
+    if (k === "B") beep("playback", k);
+    if (k === "C") beep("ambient", k);
+    if (k === "D") { setMode("auto"); const a = new Audio(BGM.chipUrl[0]); a.setAttribute("playsinline", ""); const p = a.play(); (p || Promise.resolve()).then(() => { $("rD").textContent = "已開始"; setTimeout(() => a.pause(), 2000) }, e => { $("rD").textContent = "被擋下 " + (e && e.name) }) }
+    if (k === "E") {
+      setMode("auto");
+      const ac = new (window.AudioContext || window.webkitAudioContext)();
+      const go = () => fetch(BGM.chipUrl[0]).then(r => r.arrayBuffer()).then(ab => new Promise((res, rej) => ac.decodeAudioData(ab, res, rej))).then(buf => { const n = ac.createBufferSource(); n.buffer = buf; n.connect(ac.destination); n.start(); n.stop(ac.currentTime + 2); $("rE").textContent = "引擎 " + ac.state; setTimeout(() => ac.close(), 2300) }).catch(e => { $("rE").textContent = "失敗 " + (e && (e.name || e.message)) });
+      ac.state === "running" ? go() : ac.resume().then(go, e => { $("rE").textContent = "啟動失敗 " + e.name });
+    }
+  });
+
 
   $("mtest").onclick = () => {
     st.music = true; save(); audioUnlocked = true; BGM.err = ""; waStop(); musicSync();
