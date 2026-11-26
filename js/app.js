@@ -1,6 +1,6 @@
 /* B612 單字星球 — game logic. Progress lives in this browser's localStorage, with a backup code in Settings. */
 "use strict";
-const APP_VERSION = "2026-11-27 · 強制更新版";   // keep in sync with version.json   // shown in Settings so you can tell which version the phone is running
+const APP_VERSION = "2026-11-27 · Safari 捷徑版";   // keep in sync with version.json   // shown in Settings so you can tell which version the phone is running
 
 /* ---------- 題庫 ---------- */
 // Book units first (your handwritten Day 1–2), then the extra topic units, then the movie bonus unit.
@@ -688,8 +688,8 @@ function renderHome() {
   </div>` : ""}
   ${showInstall ? `<div class="install">
     <div class="row"><b>把 B612 放到手機主畫面</b><button class="btn small" id="hideInstall" aria-label="不再顯示">✕</button></div>
-    <span>iPhone：用 Safari 打開 → 下方「分享」→「加入主畫面」。<br>Android：Chrome 右上角 ⋮ →「加到主畫面」。</span>
-    <span class="note">放到主畫面後打開就像 App，也比較不會被瀏覽器清掉進度。</span>
+    <span>iPhone：用 Safari 打開 → 下方「分享」→「加入主畫面」，如果有「以網頁 App 打開」的開關，請<b>關掉</b>。</span>
+    <span class="note">這樣主畫面的圖示會直接用 Safari 打開 B612，音樂和音效都正常；記得到設定登入雲端同步。</span>
   </div>` : ""}
   <nav class="nav">
     <button class="btn" data-go="cards">星空圖鑑</button>
