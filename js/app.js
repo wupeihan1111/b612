@@ -1,6 +1,6 @@
 /* B612 單字星球 — game logic. Progress lives in this browser's localStorage, with a backup code in Settings. */
 "use strict";
-const APP_VERSION = "2026-11-27 · 靜音開關修正版";   // keep in sync with version.json   // shown in Settings so you can tell which version the phone is running
+const APP_VERSION = "2026-11-27 · 聲音檢查版";   // keep in sync with version.json   // shown in Settings so you can tell which version the phone is running
 
 /* ---------- 題庫 ---------- */
 // Book units first (your handwritten Day 1–2), then the extra topic units, then the movie bonus unit.
@@ -1010,8 +1010,18 @@ function renderSettings() {
     <div class="row" style="justify-content:flex-start;flex-wrap:wrap"><label class="btn small" for="mfile" style="display:inline-block;cursor:pointer">選擇手機裡的音樂檔</label>
       <input type="file" id="mfile" accept="audio/*" hidden>
       ${st.musicName ? `<button class="btn small" id="mdel">移除我的音樂</button>` : ""}</div>
-    <div class="row" style="justify-content:flex-start;gap:10px;flex-wrap:wrap"><button class="btn small" id="mtest">▶ 試播音樂</button><button class="btn small" id="stest">試聽嗶聲</button><span class="note" id="mstat">${musicStatus()}</span></div>
+    <div class="row" style="justify-content:flex-start;gap:10px;flex-wrap:wrap"><button class="btn small" id="mtest">▶ 試播音樂</button><span class="note" id="mstat">${musicStatus()}</span></div>
     <p class="note">音樂檔只存在這支手機的 B612 裡，不會上傳。要用買斷的歌（例如 iTunes 購買）或一般音樂檔；Apple Music、Spotify 的串流歌曲沒辦法選。</p>
+  </section>
+  <section class="sect">
+    <h3>聲音檢查</h3>
+    <p class="note">三個按鈕各按一次，告訴我哪幾個<b>聽得到</b>。每個只會響 3 秒。</p>
+    <div class="list" style="gap:8px">
+      <div class="row"><button class="btn small" id="t1">測試 1：嗶聲</button><span class="note" id="r1"></span></div>
+      <div class="row"><button class="btn small" id="t2">測試 2：音樂（Web Audio）</button><span class="note" id="r2"></span></div>
+      <div class="row"><button class="btn small" id="t3">測試 3：音樂（播放器）</button><span class="note" id="r3"></span></div>
+    </div>
+    <p class="note" id="diag"></p>
   </section>
   <section class="sect">
     <h3>發音</h3>
@@ -1065,7 +1075,32 @@ function renderSettings() {
   const $ = id => document.getElementById(id);
   $("back").onclick = () => { confirmReset = false; go("home") };
   $("chkUpd").onclick = () => checkUpdate(true);
-  $("stest").onclick = () => { const was = st.sfx; st.sfx = true; blip(true); st.sfx = was; setTimeout(() => { const m = $("mstat"); if (m) m.textContent = musicStatus() }, 300) };
+  const diag = () => { $("diag").textContent = `主畫面模式：${isStandalone() ? "是" : "否"} · 引擎：${AC ? AC.state : "未建立"} · 取樣率：${AC ? AC.sampleRate : "-"} · 音訊模式：${navigator.audioSession ? navigator.audioSession.type : "不支援"} · 靜音保護：${keepAlive ? (keepAlive.paused ? "沒在跑" : "有在跑") : "未建立"}` };
+  diag();
+  $("t1").onclick = () => {
+    const ac = audio(); const before = ac ? ac.state : "無";
+    (ac.state === "running" ? Promise.resolve() : ac.resume()).catch(() => { }).then(() => {
+      const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime + 0.02;
+      o.type = "square"; o.frequency.value = 660; g.gain.setValueAtTime(0.08, t); g.gain.setValueAtTime(0.0001, t + 3);
+      o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 3);
+      $("r1").textContent = `已送出（引擎 ${before} → ${ac.state}）`; diag();
+    });
+  };
+  $("t2").onclick = () => {
+    const ac = audio();
+    (ac.state === "running" ? Promise.resolve() : ac.resume()).catch(() => { })
+      .then(() => waLoad(BGM.chipUrl[0]))
+      .then(buf => { const n = ac.createBufferSource(), g = ac.createGain(); g.gain.value = 0.6; n.buffer = buf; n.connect(g).connect(ac.destination); n.start(); n.stop(ac.currentTime + 3); $("r2").textContent = `已送出（引擎 ${ac.state}）`; diag() })
+      .catch(e => { $("r2").textContent = "失敗：" + (e && (e.name || e.message)) });
+  };
+  $("t3").onclick = () => {
+    const a = new Audio(BGM.chipUrl[0]); a.setAttribute("playsinline", "");
+    const p = a.play();
+    (p || Promise.resolve()).then(() => { $("r3").textContent = "已開始播放"; setTimeout(() => a.pause(), 3000) })
+      .catch(e => { $("r3").textContent = "被擋下：" + (e && e.name) });
+    diag();
+  };
+
   $("mtest").onclick = () => {
     st.music = true; save(); audioUnlocked = true; BGM.err = ""; waStop(); musicSync();
     setTimeout(() => { const m = $("mstat"); if (m) m.textContent = musicStatus() }, 800);
