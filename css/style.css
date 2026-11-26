@@ -36,7 +36,8 @@ button{touch-action:manipulation}
 .bubble::after{content:"";position:absolute;left:50%;bottom:-9px;margin-left:-4px;width:8px;height:6px;background:#fff8e6;border:3px solid var(--line);border-top:0;border-left:0;transform:skewX(30deg)}
 .hint{position:absolute;right:8px;bottom:8px;font-size:11px;color:#c9c6e6;background:#0a0d22aa;padding:1px 6px;pointer-events:none}
 .line{font-size:13px;color:#d9d3ef;text-align:center;min-height:1.5em}
-.journey{display:flex;flex-direction:column;gap:4px}
+.journey{display:flex;flex-direction:column;gap:4px;font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:left;width:100%}
+.journey:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
 .journey canvas{width:100%;aspect-ratio:128/24;border:3px solid var(--line);background:#0f1430}
 .journey .lbl{display:flex;justify-content:space-between;font-size:11px;color:var(--muted)}
 .chips{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -132,3 +133,9 @@ textarea{min-height:110px;font-family:var(--font-en);font-size:14px;resize:verti
 .exrow .ex{flex:1;min-width:0}
 .speak.sm{width:auto;height:auto;padding:4px 8px;gap:4px;display:inline-flex;align-items:center;font-size:12px;color:var(--gold);box-shadow:0 2px 0 var(--line)}
 .speak.sm svg{width:14px;height:13px}
+.dialog{font:inherit;color:var(--ink);text-align:left;cursor:pointer;min-height:110px;font-size:16px}
+.dialog .lab,.gift .lab{font-size:12px;color:var(--gold);letter-spacing:.08em}
+.dialog:focus-visible{outline:3px solid var(--gold)}
+.gift{flex-direction:row;align-items:center;gap:12px;font-size:15px}
+.coach{display:flex;gap:8px;align-items:center;font-size:13px;padding-bottom:6px;border-bottom:2px dashed #4a3a6a}
+.coach img{image-rendering:pixelated;flex:none}

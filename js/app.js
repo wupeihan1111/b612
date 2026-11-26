@@ -15,7 +15,30 @@ const BOOK_WORDS = DECKS.flatMap(d => d.words.map((a, i) => ({
 const EXAM = dayNum(new Date(2027, 0, 9));
 const INTERVALS = [1, 1, 3, 7, 14, 30];
 const STAR_STAGE = 4;
-const PLANETS = ["B612", "國王", "虛榮的人", "酒鬼", "商人", "點燈人", "地理學家", "地球"];
+/* The journey: every 150 new words the prince lands on the next planet, meets its resident and brings a souvenir home.
+   A fixed distance per leg means adding more words never pushes him backwards. */
+const LEG = 150;
+const STOPS = [
+  { id: "b612", name: "B612", who: "你的家", col: "#c49a68" },
+  { id: "king", name: "國王的星球", who: "國王", col: "#9b72cf", gift: "crown", giftName: "國王的小王冠",
+    lines: ["啊！一個臣民！過來讓我看看你。", "我命令你：明天也要回來背單字。", "這是個合理的命令，因為你做得到。"] },
+  { id: "vain", name: "愛慕虛榮的人", who: "愛慕虛榮的人", col: "#e0556e", gift: "hat", giftName: "會打招呼的帽子",
+    lines: ["你是來崇拜我的嗎？快拍拍手！", "⋯⋯什麼？你已經認識 300 個單字了？", "好吧，這次換我替你拍手。"] },
+  { id: "drunk", name: "酒鬼的星球", who: "酒鬼", col: "#6d8bd6", gift: "hourglass", giftName: "不會忘記的沙漏",
+    lines: ["我在這裡，是為了忘記一些事。", "你不一樣，你每天複習，是為了不要忘記。", "這個沙漏給你，提醒你時間會幫你記住。"] },
+  { id: "biz", name: "商人的星球", who: "商人", col: "#e8c35a", gift: "starjar", giftName: "裝星星的瓶子",
+    lines: ["別吵，我在數我擁有的星星。", "你說你也有星星？是你自己點亮的？", "那些星星比我的更值錢。拿這個瓶子去裝吧。"] },
+  { id: "lamp", name: "點燈人的星球", who: "點燈人", col: "#ff8a3d", gift: "lamp", giftName: "一盞小路燈",
+    lines: ["早安！晚安！我每天準時點燈、熄燈。", "你也每天準時回來清火山，對吧？", "我們是同一種人。這盞燈送你。"] },
+  { id: "geo", name: "地理學家的星球", who: "地理學家", col: "#6cbf7a", gift: "globe", giftName: "地理學家的地球儀",
+    lines: ["我只記錄永遠不會改變的東西。", "你腦袋裡的那些單字，已經不會跑掉了。", "下一站，去地球吧。那裡有人在等你。"] },
+  { id: "earth", name: "地球", who: "狐狸", col: "#4aa3df", gift: "fox", giftName: "狐狸朋友",
+    lines: ["你終於來了。這裡就是考場。", "你每天都來，所以你已經馴養了好多單字。", "重要的東西，用心才看得見。我跟你回 B612，考試加油。"] },
+];
+function legsDone() { return Math.min(STOPS.length - 1, Math.floor(seenCount() / LEG)) }
+function nextStop() { const i = legsDone() + 1; return i < STOPS.length ? { stop: STOPS[i], left: i * LEG - seenCount() } : null }
+function pendingLanding() { for (let i = 1; i <= legsDone(); i++) if (!S.visited.includes(STOPS[i].id)) return STOPS[i].id; return null }
+function foxHourNow() { return new Date().getHours() === S.settings.foxHour }
 const LINES = [
   "狐狸說：馴養需要時間。今天也來馴養幾個字吧。",
   "猴麵包樹要趁小的時候拔，單字也是。",
@@ -33,7 +56,7 @@ function toast(msg, ms = 2600) { const t = document.getElementById("toast"); t.t
 
 /* ---------- 進度存檔 ---------- */
 const LS = "b612.v2";
-function fresh() { return { v: 2, words: {}, today: null, sunsets: [], settings: { perDay: 40, rate: 0.9, voice: "", sfx: true }, custom: [], installHidden: false, updatedAt: 0 } }
+function fresh() { return { v: 2, words: {}, today: null, sunsets: [], visited: [], foxDays: [], landing: null, settings: { perDay: 40, rate: 0.9, voice: "", sfx: true, foxHour: 21 }, custom: [], installHidden: false, updatedAt: 0 } }
 function load() { try { const r = localStorage.getItem(LS); if (r) { const o = JSON.parse(r); return Object.assign(fresh(), o, { settings: Object.assign(fresh().settings, o.settings) }) } } catch (e) { } return fresh() }
 let S = load();
 function save() { S.updatedAt = Date.now(); try { localStorage.setItem(LS, JSON.stringify(S)) } catch (e) { toast("存檔失敗：瀏覽器不允許儲存資料，請關閉無痕模式。") } }
@@ -141,7 +164,7 @@ function blip(ok) {
 }
 
 /* ---------- 像素圖 ---------- */
-const PAL = { h: "#f2c14e", H: "#c9962e", s: "#f6d2b0", e: "#2a2440", g: "#4f9a62", G: "#3a7a4c", y: "#f7dd5a", b: "#3b2f4a", r: "#e0556e", R: "#a83a52", l: "#6cbf7a", L: "#3f8a50", t: "#7a5236", v: "#7a5568", V: "#553a4c", x: "#6d6a7c", X: "#4d4a5c", d: "#2c2236", o: "#ff8a3d", f: "#e8833a", F: "#fff1dc", k: "#2a2440", w: "#ffffff", c: "#c9e6ff" };
+const PAL = { h: "#f2c14e", H: "#c9962e", s: "#f6d2b0", e: "#2a2440", g: "#4f9a62", G: "#3a7a4c", y: "#f7dd5a", b: "#3b2f4a", r: "#e0556e", R: "#a83a52", l: "#6cbf7a", L: "#3f8a50", t: "#7a5236", v: "#7a5568", V: "#553a4c", x: "#6d6a7c", X: "#4d4a5c", d: "#2c2236", o: "#ff8a3d", f: "#e8833a", F: "#fff1dc", k: "#2a2440", w: "#ffffff", c: "#c9e6ff", p: "#8a5cc2", P: "#5e3d8a", u: "#4a74c9", z: "#8f8c9e" };
 const SPR = {
   prince: ["...hhhh...", "..hhhhhh..", ".hhhhhhhh.", ".hHhhhhHh.", "..sesses..", "..ssssss..", ".yyyyyyy..", "..gggggyyy", ".gggggggg.", ".gggggggg.", "..gggggg..", "..gg..gg..", "..gg..gg..", "..bb..bb.."],
   prince2: ["...hhhh...", "..hhhhhh..", ".hhhhhhhh.", ".hHhhhhHh.", "..sesses..", "..ssssss..", ".yyyyyyy..", "..gggggyy.", ".ggggggggy", ".gggggggg.", "..gggggg..", "..gg..gg..", "..gg..gg..", "..bb..bb.."],
@@ -165,6 +188,22 @@ SPR.walk1 = ["...hh.h...", "..hhhhhh..", ".hhhhhhhh.", "hhhhhhsss.", ".hhhhsses.
 SPR.walk2 = ["...hh.h...", "..hhhhhh..", ".hhhhhhhh.", "hhhhhhsss.", ".hhhhsses.", "..hhssss..", ".yyyyyyy..", "yyygggggg.", "...ggggg..", "...gggggg.", "..ggggggg.", "....g.g...", "....bbbb.."];
 SPR.roseDome = ["...ccccc...", "..c.....c..", ".c..r.r..c.", ".c.rrRrr.c.", ".c..rrr..c.", ".c...l...c.", ".c.ll.l..c.", ".c...ll..c.", ".c...l...c.", "ccccccccccc"];
 
+Object.assign(SPR, {
+  king: ["..h.h.h..", "..hhhhh..", "..sssss..", "..seses..", "..wwwww..", "...www...", ".ppppppp.", "ppwpppwpp", "ppppppppp", "PpppppppP", ".PPPPPPP."],
+  vainman: ["..kkkkk..", "..kkkkk..", "..rrrrr..", "kkkkkkkkk", "..sssss..", "..seses..", "..sssss..", ".rrrrrrr.", "r.rrrrr.r", "..rrrrr..", "..b...b.."],
+  drunkard: ["...zzz...", "..zzzzz..", "..sssss..", "..sesse..", "..sssss..", ".uuuuuuu.", "uuuuuuull", "uuuuuuul.", ".uuuuuu..", ".uu..uu..", ".bb..bb.."],
+  businessman: ["..sssss..", ".sssssss.", ".skkskks.", ".sssssss.", "..sssss..", ".XXXrXXX.", "XXXXrXXXX", "XXXXXXXXX", ".XXXXXXX.", ".XX...XX.", ".bb...bb."],
+  lamplighter: ["..uuuu..o", ".uuuuuu.o", "..ssss..k", "..sess..k", "..ssss..k", ".uuuuuu.k", "uuuuuuusk", ".uuuuuu.k", ".uuuuuu.k", ".uu..uu.k", ".bb..bb.k"],
+  geographer: ["..zzzzz..", "..sssss..", "..kskks..", "..wwwww..", "..wwwww..", "...www...", ".ttttttt.", "tttFFFttt", "ttttttttt", ".ttttttt.", ".tt...tt."],
+  crown: ["h.h.h", "hhhhh", "hrhuh"],
+  hat: [".kkk.", ".kkk.", ".rrr.", "kkkkk"],
+  hourglass: ["ttttt", ".cyc.", "..y..", ".cyc.", ".yyy.", "ttttt"],
+  starjar: [".ttt.", "c...c", "cy.yc", "c.y.c", "cyyyc", "ccccc"],
+  lamp: [".kkk.", "kyyyk", ".kyk.", "..k..", "..k..", "..k..", "..k..", ".kkk."],
+  globe: [".uuu.", "ulluu", "uuull", ".uuu.", "..t..", ".ttt."],
+});
+const RESIDENT = { king: SPR.king, vain: SPR.vainman, drunk: SPR.drunkard, biz: SPR.businessman, lamp: SPR.lamplighter, geo: SPR.geographer, earth: SPR.fox };
+const GIFT_AT = { crown: 1.55, hat: -1.2, hourglass: 2.2, starjar: -1.95, lamp: -2.7, globe: 2.5, fox: 1.0 };
 const sprCache = new Map();
 function sprCanvas(rows, flip) {
   const key = rows.join("|") + (flip ? "<" : "");
@@ -186,8 +225,12 @@ function onPlanet(ctx, rows, ang, lift = 0) {
 }
 function drawScene(cv, tick, opt) {
   const ctx = cv.getContext("2d"); ctx.imageSmoothingEnabled = false;
-  const sunset = opt.sunset, phi = walker.phi;
-  const bands = sunset ? ["#2b2f6b", "#4c3a78", "#8a4c7c", "#c8636d", "#ee8f5c", "#f6b766"] : ["#0d1129", "#11163a", "#151b45", "#1a2150", "#20285c", "#262f68"];
+  // sky: 0 night · 1 sun going down · 2 sun almost gone · 3 the starry night after the day's sunset
+  const sky = opt.sky || 0, sunset = sky === 1 || sky === 2, phi = walker.phi;
+  const bands = [["#0d1129", "#11163a", "#151b45", "#1a2150", "#20285c", "#262f68"],
+    ["#3a4a8a", "#5b5a9a", "#9a6a8f", "#d98a6a", "#f2b56a", "#f8d27a"],
+    ["#2b2f6b", "#4c3a78", "#8a4c7c", "#c8636d", "#ee8f5c", "#f6b766"],
+    ["#0a0d24", "#101438", "#1a1a48", "#272356", "#362a5e", "#4b3268"]][sky];
   const bh = Math.ceil(H / bands.length);
   for (let b = 0; b < bands.length; b++) {
     ctx.fillStyle = bands[b]; ctx.fillRect(0, b * bh, W, bh);
@@ -204,7 +247,8 @@ function drawScene(cv, tick, opt) {
     if (on) { ctx.fillStyle = "#fff"; ctx.fillRect(x, y, 1, 1) }
   }
   const sp = tick % 90; if (sp < 8) { ctx.fillStyle = "#fff"; for (let k = 0; k < 4; k++)ctx.fillRect(104 - sp * 5 + k * 2, 6 + sp * 2 - k, 1, 1) }
-  if (sunset) { ctx.fillStyle = "#ffd27a"; for (let y = -9; y <= 9; y++) { const hw = Math.floor(Math.sqrt(81 - y * y)); ctx.fillRect(98 - hw, 70 + y, hw * 2, 1) } }
+  if (sunset) { const sy = sky === 1 ? 54 : 76; ctx.fillStyle = sky === 1 ? "#ffe08a" : "#ffb35c"; for (let y = -9; y <= 9; y++) { const hw = Math.floor(Math.sqrt(81 - y * y)); ctx.fillRect(98 - hw, sy + y, hw * 2, 1) } }
+  if (sky === 3) { const r3 = seeded(99); for (let i = 0; i < 30; i++) { const x = Math.floor(r3() * W), y = Math.floor(r3() * H); if ((Math.floor(tick / 2) + i) % 5) { ctx.fillStyle = "#fff6d0"; ctx.fillRect(x, y, 1, 1) } } }
   // planet body, light from upper left
   for (let y = -PR - 1; y <= PR + 1; y++) {
     const hw = Math.floor(Math.sqrt(Math.max(0, (PR + 1) * (PR + 1) - y * y)));
@@ -230,13 +274,15 @@ function drawScene(cv, tick, opt) {
       for (let k = 0; k < 4; k++) { const p = (tick + k * 4) % 14; ctx.fillStyle = k % 2 ? "#8d8aa8" : "#b9b6cf"; ctx.fillRect(Math.round(x + Math.sin((p + k) / 3) * 2), Math.round(y - p), 2, 2) }
     }
   });
+  (opt.gifts || []).forEach(g => { if (g !== "fox") onPlanet(ctx, SPR[g], GIFT_AT[g] + phi) });
+  if (opt.fox) onPlanet(ctx, SPR.fox, GIFT_AT.fox + phi);
   const st = opt.streak;
   onPlanet(ctx, st >= 7 ? SPR.roseDome : st === 0 ? SPR.wilt : st < 3 ? SPR.bud : SPR.rose, PLACES.rose + phi);
   // the prince always stands on top; side view while walking
   const moving = walker.dragging || Math.abs(walker.vel) > 0.002;
   let rows;
   if (moving) rows = Math.floor(walker.dist / 0.09) % 2 ? SPR.walk2 : SPR.walk1;
-  else rows = opt.done.every(Boolean) ? SPR.princeHappy : (tick % 6 < 3 ? SPR.prince : SPR.prince2);
+  else rows = sky === 3 ? SPR.princeHappy : (tick % 6 < 3 ? SPR.prince : SPR.prince2);
   const c = sprCanvas(rows, moving && walker.face < 0);
   const hop = opt.jump > 0 ? Math.round(Math.sin(opt.jump / 6 * Math.PI) * 4) : 0;
   ctx.drawImage(c, PX - Math.floor(c.width / 2), PY - PR - c.height + 1 - hop);
@@ -246,14 +292,34 @@ function drawJourney(cv, frac, tick) {
   const ctx = cv.getContext("2d"), w = 128, h = 24; ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = "#0f1430"; ctx.fillRect(0, 0, w, h);
   ctx.fillStyle = "#3a4277"; for (let x = 8; x < 120; x += 3) ctx.fillRect(x, 19, 1, 1);
-  const cols = ["#c49a68", "#b37acb", "#e0556e", "#6d8bd6", "#e8c35a", "#ff8a3d", "#6cbf7a", "#4aa3df"];
-  PLANETS.forEach((p, i) => {
-    const x = 8 + Math.round(i * 112 / (PLANETS.length - 1)), r = i === 7 ? 3 : 2;
-    ctx.fillStyle = frac >= i / (PLANETS.length - 1) - 1e-9 ? cols[i] : "#3a4277";
+  STOPS.forEach((p, i) => {
+    const x = 8 + Math.round(i * 112 / (STOPS.length - 1)), r = i === 7 ? 3 : 2;
+    ctx.fillStyle = frac >= i / (STOPS.length - 1) - 1e-9 ? p.col : "#3a4277";
     for (let y = -r; y <= r; y++) { const hw = Math.floor(Math.sqrt(r * r - y * y + .5)); ctx.fillRect(x - hw, 19 + y, hw * 2 + 1, 1) }
   });
   const mx = 8 + Math.round(Math.min(1, frac) * 112);
   spr(ctx, Math.floor(tick / 2) % 2 ? SPR.walk2 : SPR.walk1, Math.max(0, Math.min(w - 10, mx - 5)), 3);
+}
+
+function shadeHex(hex, f) { const n = parseInt(hex.slice(1), 16); const c = [n >> 16, (n >> 8) & 255, n & 255].map(v => Math.max(0, Math.min(255, Math.round(v * f)))); return "#" + c.map(v => v.toString(16).padStart(2, "0")).join("") }
+function drawVisit(cv, stop, tick) {
+  const ctx = cv.getContext("2d"); ctx.imageSmoothingEnabled = false;
+  const bands = ["#0d1129", "#11163a", "#151b45", "#1a2150", "#20285c", "#262f68"], bh = Math.ceil(H / bands.length);
+  bands.forEach((c, b) => { ctx.fillStyle = c; ctx.fillRect(0, b * bh, W, bh) });
+  const r1 = seeded(stop.id.length * 13);
+  for (let i = 0; i < 60; i++) { const x = Math.floor(r1() * W), y = Math.floor(r1() * H); ctx.fillStyle = (Math.floor(tick / 3) + i) % 9 ? "rgba(200,205,255,.5)" : "#fff"; ctx.fillRect(x, y, 1, 1) }
+  // far away: a tiny B612 to fly home to
+  ctx.fillStyle = "#c49a68"; for (let y = -3; y <= 3; y++) { const hw = Math.floor(Math.sqrt(9 - y * y + .5)); ctx.fillRect(100 - hw, 14 + y, hw * 2 + 1, 1) }
+  const cx = 56, cy = 58, r = 20;
+  for (let y = -r - 1; y <= r + 1; y++) { const hw = Math.floor(Math.sqrt(Math.max(0, (r + 1) * (r + 1) - y * y))); ctx.fillStyle = "#1a1430"; ctx.fillRect(cx - hw, cy + y, hw * 2 + 1, 1) }
+  for (let y = -r; y <= r; y++) { const hw = Math.floor(Math.sqrt(Math.max(0, r * r - y * y))); for (let x = -hw; x <= hw; x++) { const d = Math.hypot(x + r * .45, y + r * .45) / r; ctx.fillStyle = d > 1.2 ? shadeHex(stop.col, .62) : d > .7 ? shadeHex(stop.col, .82) : stop.col; ctx.fillRect(cx + x, cy + y, 1, 1) } }
+  const at = (rows, ang) => { const c = sprCanvas(rows); ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang); ctx.drawImage(c, -Math.floor(c.width / 2), -r - c.height + 1); ctx.restore() };
+  if (stop.id === "b612") { at(SPR.rose, .5); at(SPR.vol, -.6) }
+  else {
+    at(RESIDENT[stop.id], 0.18);
+    at(tick % 6 < 3 ? SPR.walk1 : SPR.walk2, -0.42);
+    if (stop.gift && stop.gift !== "fox") at(SPR[stop.gift], 0.85);
+  }
 }
 
 /* The prince talks in chiptune babble, not the word-reading voice. */
@@ -304,15 +370,17 @@ function go(v) { view = v; render(); window.scrollTo(0, 0) }
 function render() {
   cancelAnimationFrame(anim); anim = null;
   ensureToday();
-  ({ home: renderHome, learn: renderLearn, quiz: renderQuiz, result: renderResult, cards: renderCards, settings: renderSettings })[view]();
+  ({ home: renderHome, learn: renderLearn, quiz: renderQuiz, result: renderResult, cards: renderCards, settings: renderSettings, planets: renderPlanets, land: renderLand })[view]();
 }
-function sceneOpts(sunset) {
+function skyStage() { return S.today.done.filter(Boolean).length }
+function sceneOpts(sky) {
   const t = today();
-  return { sunset, jump, stars: stars(), done: S.today.done, streak: streak(), baobabs: dueWords().map(w => t - ws(w.id).due).sort((a, b) => b - a) };
+  const gifts = STOPS.filter(st => st.gift && S.visited.includes(st.id)).map(st => st.gift);
+  return { sky, jump, gifts, fox: gifts.includes("fox") || foxHourNow(), stars: stars(), done: S.today.done, streak: streak(), baobabs: dueWords().map(w => t - ws(w.id).due).sort((a, b) => b - a) };
 }
 function startAnim(cv, sunset, journey) {
   let last = 0; const total = ALL().length || 1;
-  const frame = () => { drawScene(cv, tick, sceneOpts(sunset)); if (journey) drawJourney(journey, seenCount() / total, tick) };
+  const frame = () => { drawScene(cv, tick, sceneOpts(sunset)); if (journey) drawJourney(journey, Math.min(1, seenCount() / (LEG * (STOPS.length - 1))), tick) };
   const loop = ts => {
     const moving = walker.dragging || Math.abs(walker.vel) > 0.002;
     if (!walker.dragging && moving) { walker.phi += walker.vel; walker.dist += Math.abs(walker.vel); walker.vel *= 0.93 }
@@ -344,7 +412,10 @@ function renderHome() {
     { t: "活火山 · 第二座", s: T.v2.length ? `新單字 ${T.v2.length} 個 · 約 5 分鐘` : "新單字都遇見過了，改成隨機複習", lock: !T.done[0] },
     { t: "死火山", s: due ? `複習到期單字 ${Math.min(due, 30)} 個` : "今天學過的字再考一次", lock: !anySeen },
   ];
-  const line = allDone ? "三座火山都清好了，B612 現在是夕陽時間。明天見！" : LINES[today() % LINES.length];
+  const fh = S.settings.foxHour, foxNow = foxHourNow(), nx = nextStop();
+  const line = allDone ? "三座火山都清好了，今天的夕陽已經落下，滿天星星。明天見！"
+    : foxNow ? `狐狸來了！現在是狐狸時間（${fh}:00–${fh}:59），這時候清火山牠會很開心。`
+    : LINES[today() % LINES.length];
   const showInstall = !isStandalone() && !S.installHidden;
   app.innerHTML = `
   <header class="top">
@@ -357,15 +428,17 @@ function renderHome() {
     <span class="hint">← 左右滑動繞星球 →</span>
   </div>
   <p class="line">${esc(line)}</p>
-  <div class="journey">
+  <button class="journey" id="journeyBtn" aria-label="打開星球之旅">
     <canvas id="journey" width="128" height="24" aria-hidden="true"></canvas>
-    <div class="lbl"><span>B612</span><span>已遇見 ${seenCount()} / ${total} 字</span><span>地球（考場）</span></div>
-  </div>
+    <span class="lbl"><span>B612</span><span>${nx ? `下一站：${esc(nx.stop.name)} · 還差 ${nx.left} 字` : "已經抵達地球"}</span><span>地球（考場）</span></span>
+  </button>
   <div class="chips">
     <span class="chip"><i style="background:var(--rose)"></i>玫瑰連續<b>${st} 天</b></span>
     <span class="chip"><i style="background:var(--gold)"></i>點亮星星<b>${nStars}</b></span>
     <span class="chip"><i style="background:var(--leaf)"></i>猴麵包樹<b>${due}</b></span>
     <span class="chip"><i style="background:var(--ember)"></i>看過夕陽<b>${S.sunsets.length} 次</b></span>
+    <span class="chip"><i style="background:#e8833a"></i>狐狸好感<b>${S.foxDays.length}</b></span>
+    <span class="chip"><i style="background:#9b72cf"></i>紀念物<b>${S.visited.length} / 7</b></span>
   </div>
   <div class="list">
     ${vols.map((v, i) => `<button class="btn vol" data-vol="${i}" ${v.lock || T.done[i] ? "disabled" : ""}>
@@ -389,7 +462,8 @@ function renderHome() {
     <button class="btn" data-go="settings">設定</button>
   </nav>`;
   const cv = document.getElementById("scene");
-  startAnim(cv, allDone, document.getElementById("journey"));
+  startAnim(cv, skyStage(), document.getElementById("journey"));
+  document.getElementById("journeyBtn").onclick = () => go("planets");
   bindWalk(cv, document.getElementById("bubble"));
   app.querySelectorAll("[data-icon]").forEach(c => { const i = +c.dataset.icon; drawIcon(c, i === 3 ? SPR.tree : i === 2 ? SPR.dead : SPR.volHot, 2) });
   app.querySelectorAll("[data-vol]").forEach(b => b.onclick = () => startSession(+b.dataset.vol));
@@ -522,7 +596,7 @@ function answer(i) {
      <div class="row"><button class="word" id="w2" lang="en" style="font-size:28px">${esc(w.w)}</button><button class="speak" id="say2" aria-label="播放發音">${speakerSvg()}</button></div>
      <span class="pos">${esc(w.pos)}　<span style="font-family:var(--font-zh);color:var(--ink)">${esc(w.zh)}</span></span>
      ${exHtml(w)}
-     ${showHook ? hookHtml(w) : ""}
+     ${showHook ? hookHtml(w, true) : ""}
      ${w.tip ? `<div class="tip"><span class="lab">記憶小技巧</span>${esc(w.tip)}</div>` : ""}
      ${w.hook && !showHook ? `<p class="note">再錯一次，就會解鎖這個字的電影記憶句。</p>` : ""}
    </article>
@@ -535,24 +609,38 @@ function answer(i) {
 }
 function exHtml(w) { return w.ex ? `<div class="exrow"><p class="ex" lang="en">${esc(w.ex)}</p><button class="speak sm" data-say-ex="${esc(w.id)}" aria-label="播放例句">${speakerSvg()}<span>句子</span></button></div><p class="exzh">${esc(w.exZh)}</p>` : "" }
 function bindEx(root) { root.querySelectorAll("[data-say-ex]").forEach(b => b.onclick = e => { e.stopPropagation(); const w = byId(b.dataset.sayEx); speak(w.ex, 0.92) }) }
-function hookHtml(w) { const h = w.hook; return `<div class="hook"><span class="lab">記憶句 · 頑固單字解鎖</span>${h.q ? `<p class="ex" lang="en">“${esc(h.q)}”</p><span class="note" lang="en">— ${esc(h.src)}${h.zh ? `（${esc(h.zh)}）` : ""}</span>` : `<span class="src" lang="en">${esc(h.src)}</span>${h.zh ? `<span class="note">${esc(h.zh)}</span>` : ""}`}<span>${esc(h.note)}</span></div>` }
+let foxImg = null;
+function foxSrc() { if (!foxImg) { const c = document.createElement("canvas"); c.width = 11; c.height = 8; spr(c.getContext("2d"), SPR.fox, 0, 0); foxImg = c.toDataURL() } return foxImg }
+function hookHtml(w, coach) { const h = w.hook; return `<div class="hook">${coach ? `<div class="coach"><img src="${foxSrc()}" alt="" width="33" height="24"><span>狐狸：「這個字好像很難馴養。我陪你，用這句來記。」</span></div>` : ""}<span class="lab">記憶句 · 頑固單字解鎖</span>${h.q ? `<p class="ex" lang="en">“${esc(h.q)}”</p><span class="note" lang="en">— ${esc(h.src)}${h.zh ? `（${esc(h.zh)}）` : ""}</span>` : `<span class="src" lang="en">${esc(h.src)}</span>${h.zh ? `<span class="note">${esc(h.zh)}</span>` : ""}`}<span>${esc(h.note)}</span></div>` }
 function finishSession() {
   const T = S.today, t = today();
   if (SES.kind < 3) T.done[SES.kind] = true;
   const firstSunset = !S.sunsets.includes(t);
   if (firstSunset) S.sunsets.push(t);
+  T.stars = (T.stars || 0) + SES.newStars;
+  const fox = foxHourNow() && !S.foxDays.includes(t);
+  if (fox) S.foxDays.push(t);
   save();
-  lastResult = { kind: SES.kind, right: SES.right, wrong: SES.wrong, newStars: SES.newStars, best: SES.best, firstSunset, n: S.sunsets.length, allDone: T.done.every(Boolean) };
+  lastResult = { kind: SES.kind, right: SES.right, wrong: SES.wrong, newStars: SES.newStars, best: SES.best, firstSunset, n: S.sunsets.length, stage: skyStage(), dayStars: T.stars, fox };
   SES = null; go("result");
 }
 function renderResult() {
   const r = lastResult; const names = ["第一座活火山", "第二座活火山", "死火山", "猴麵包樹"];
-  const foxLine = r.allDone ? "三座火山都清好了。你已經把今天的 B612 照顧得很好。" : r.wrong ? "答錯的字別擔心，明天它們會再回來找你。" : "全部答對！你最好每天在同一個時間來。";
+  const stage = Math.max(1, r.stage);
+  let big, note;
+  if (r.kind === 3) { big = "做得好"; note = "猴麵包樹越少，B612 越安全。" }
+  else if (stage === 3) { big = "今天的夕陽落下了"; note = `三座火山都清好了${r.dayStars ? `，今天點亮了 ${r.dayStars} 顆新星星` : "，今晚的星空屬於你"}。離考試還有 ${daysLeft()} 天。` }
+  else if (r.firstSunset) { big = `第 ${r.n} 次夕陽`; note = `小王子曾經在一天裡看了 44 次夕陽。離考試還有 ${daysLeft()} 天。` }
+  else { big = "夕陽更低了"; note = "今天還剩一座火山，清完就能看到今晚的星空。" }
+  const foxLine = r.fox ? `你準時在狐狸時間來了！狐狸好感 +1（共 ${S.foxDays.length}）。`
+    : stage === 3 ? "晚安。你已經把今天的 B612 照顧得很好。"
+    : r.wrong ? "答錯的字別擔心，明天它們會再回來找你。" : "全部答對！你最好每天在同一個時間來。";
+  const pend = pendingLanding();
   app.innerHTML = `
-  <canvas class="scene" id="scene" width="${W}" height="${H}" role="img" aria-label="B612 上的夕陽"></canvas>
+  <canvas class="scene" id="scene" width="${W}" height="${H}" role="img" aria-label="${stage === 3 ? "夕陽落下後的星空" : "B612 上的夕陽"}"></canvas>
   <div class="center" style="display:flex;flex-direction:column;gap:6px">
     <p class="prompt">${r.kind === 3 ? "猴麵包樹拔掉了" : names[r.kind] + "清乾淨了"}</p>
-    ${r.firstSunset ? `<p class="big-num">第 ${r.n} 次夕陽</p><p class="note">小王子曾經在一天裡看了 44 次夕陽。離考試還有 ${daysLeft()} 天。</p>` : `<p class="big-num">做得好</p>`}
+    <p class="big-num">${big}</p><p class="note">${esc(note)}</p>
   </div>
   <div class="stats">
     <div class="stat"><b>${r.right}</b>一次就答對</div>
@@ -561,12 +649,72 @@ function renderResult() {
   </div>
   <div class="card" style="flex-direction:row;align-items:center;gap:12px">
     <canvas width="24" height="18" style="width:56px;height:42px;flex:none" id="fox"></canvas>
-    <p style="font-size:14px">狐狸說：${esc(foxLine)}${r.wrong ? `（${r.wrong} 個字明天再見）` : ""}</p>
+    <p style="font-size:14px">狐狸說：${esc(foxLine)}${r.wrong && stage < 3 ? `（${r.wrong} 個字明天再見）` : ""}</p>
   </div>
-  <button class="btn gold center" id="home">回到 B612</button>`;
-  startAnim(document.getElementById("scene"), true);
+  ${pend ? `<p class="note center">小王子的旅程走到了新的星球⋯⋯</p>` : ""}
+  <button class="btn gold center" id="home">${pend ? "出發，前往新的星球" : "回到 B612"}</button>`;
+  startAnim(document.getElementById("scene"), stage);
   drawIcon(document.getElementById("fox"), SPR.fox, 2);
-  document.getElementById("home").onclick = () => go("home");
+  document.getElementById("home").onclick = () => { if (pend) { S.landing = pend; save(); go("land") } else go("home") };
+}
+
+/* ---------- 星球之旅 ---------- */
+function renderPlanets() {
+  const seen = seenCount(), done = legsDone();
+  app.innerHTML = `
+  <div class="qtop" style="grid-template-columns:auto 1fr"><button class="btn small" id="back" aria-label="回到 B612">✕</button><h2 style="font-size:18px">星球之旅 <span class="note">每遇見 ${LEG} 個新字抵達下一站</span></h2></div>
+  <p class="note">B612 永遠是你的家，每天回來清火山。旅程是小王子晚上出去拜訪的地方，去過的星球隨時可以再回去看看。</p>
+  <div class="list">
+    ${STOPS.map((st, i) => {
+      const visited = i === 0 || S.visited.includes(st.id), reached = i <= done;
+      const state = i === 0 ? "你的家" : visited ? "已拜訪" : reached ? "可以登陸了" : i === done + 1 ? `還差 ${i * LEG - seen} 字` : `第 ${i * LEG} 字抵達`;
+      return `<button class="btn vol" data-stop="${i}" ${reached ? "" : "disabled"}>
+        <canvas width="16" height="14" style="width:48px;height:42px" data-res="${i}"></canvas>
+        <span><span class="t">${esc(st.name)}</span><br><span class="s">${i === 0 ? "火山、玫瑰和你點亮的星星" : visited ? "紀念物：" + esc(st.giftName) : "居民：" + esc(st.who)}</span></span>
+        <span class="tag ${visited ? "clean" : reached ? "smoke" : "lock"}">${state}</span></button>`;
+    }).join("")}
+  </div>`;
+  document.getElementById("back").onclick = () => go("home");
+  app.querySelectorAll("[data-res]").forEach(c => { const st = STOPS[+c.dataset.res]; drawIcon(c, st.id === "b612" ? SPR.prince : RESIDENT[st.id], 1) });
+  app.querySelectorAll("[data-stop]").forEach(b => b.onclick = () => { const st = STOPS[+b.dataset.stop]; if (st.id === "b612") { go("home"); return } S.landing = st.id; save(); go("land") });
+}
+function renderLand() {
+  const st = STOPS.find(x => x.id === S.landing) || STOPS[1];
+  const first = !S.visited.includes(st.id);
+  let li = 0;
+  app.innerHTML = `
+  <canvas class="scene" id="visit" width="${W}" height="${H}" role="img" aria-label="${esc(st.name)}，上面住著${esc(st.who)}"></canvas>
+  <div class="center" style="display:flex;flex-direction:column;gap:4px">
+    <p class="prompt">${first ? "登陸新星球" : "再次拜訪"}</p>
+    <p class="big-num" style="font-size:30px">${esc(st.name)}</p>
+  </div>
+  <button class="card dialog" id="talk" aria-live="polite">
+    <span class="lab">${esc(st.who)}</span>
+    <span id="dline">${esc(st.lines[0])}</span>
+    <span class="note" id="dhint">點這裡繼續 ▸</span>
+  </button>
+  <div class="card gift" id="gift" hidden>
+    <canvas width="12" height="10" style="width:48px;height:40px;flex:none" id="giftIcon"></canvas>
+    <span><span class="lab">${first ? "得到紀念物" : "你的紀念物"}</span><br>${esc(st.giftName)}<br><span class="note">${st.gift === "fox" ? "狐狸會搬到 B612 跟你住在一起。" : "它會擺在你的 B612 上，繞著星球走就看得到。"}</span></span>
+  </div>
+  <button class="btn gold center" id="fly" hidden>${first ? "收下紀念物，飛回 B612" : "飛回 B612"}</button>`;
+  const cv = document.getElementById("visit");
+  let last = 0; const loop = ts => { if (ts - last > 140) { tick++; last = ts; drawVisit(cv, st, tick) } anim = requestAnimationFrame(loop) };
+  drawVisit(cv, st, tick); anim = requestAnimationFrame(loop);
+  drawIcon(document.getElementById("giftIcon"), SPR[st.gift] || SPR.fox, st.gift === "fox" ? 1 : 2);
+  babble(st.lines[0].length);
+  const showEnd = () => { document.getElementById("gift").hidden = false; document.getElementById("fly").hidden = false; document.getElementById("dhint").textContent = "" };
+  document.getElementById("talk").onclick = () => {
+    if (li >= st.lines.length - 1) { showEnd(); return }
+    li++; document.getElementById("dline").textContent = st.lines[li]; babble(st.lines[li].length);
+    if (li === st.lines.length - 1) showEnd();
+  };
+  document.getElementById("fly").onclick = () => {
+    if (first) S.visited.push(st.id);
+    S.landing = null; save();
+    const more = pendingLanding();
+    if (more) { S.landing = more; save(); go("land") } else go("home");
+  };
 }
 
 /* ---------- 星空圖鑑 ---------- */
@@ -603,6 +751,11 @@ function renderSettings() {
     <p class="note">書本每個 Day 有 40 字。設 40 就是一天讀完一個 Day，30 天讀完整本，最後兩週專心複習。</p>
   </section>
   <section class="sect">
+    <h3>狐狸時間</h3>
+    <label for="foxh">每天固定回來的時間（這個小時內清火山，狐狸會出現並增加好感）
+      <select id="foxh">${Array.from({ length: 18 }, (_, i) => i + 6).map(h => `<option value="${h}" ${st.foxHour === h ? "selected" : ""}>${h}:00 – ${h}:59</option>`).join("")}</select></label>
+  </section>
+  <section class="sect">
     <h3>發音</h3>
     <label for="voice">聲音
       <select id="voice"><option value="">自動挑選美式發音</option>${voices.map(v => `<option value="${esc(v.name)}" ${st.voice === v.name ? "selected" : ""}>${esc(v.name)} (${esc(v.lang)})</option>`).join("")}</select></label>
@@ -635,6 +788,7 @@ function renderSettings() {
   </section>`;
   const $ = id => document.getElementById(id);
   $("back").onclick = () => { confirmReset = false; go("home") };
+  $("foxh").onchange = e => { st.foxHour = +e.target.value; save(); toast(`狐狸會在 ${st.foxHour}:00 等你`) };
   $("per").onchange = e => { st.perDay = +e.target.value; save(); toast("明天開始，每天 " + st.perDay + " 個新字") };
   $("voice").onchange = e => { st.voice = e.target.value; save(); speak("negotiate") };
   $("rate").oninput = e => { st.rate = +e.target.value; $("rateV").textContent = st.rate.toFixed(2) + "x" };
