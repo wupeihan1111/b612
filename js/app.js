@@ -1,6 +1,6 @@
 /* B612 單字星球 — game logic. Progress lives in this browser's localStorage, with a backup code in Settings. */
 "use strict";
-const APP_VERSION = "2026-11-27 · 聲音檢查 2";   // keep in sync with version.json   // shown in Settings so you can tell which version the phone is running
+const APP_VERSION = "2026-11-27 · 強制更新版";   // keep in sync with version.json   // shown in Settings so you can tell which version the phone is running
 
 /* ---------- 題庫 ---------- */
 // Book units first (your handwritten Day 1–2), then the extra topic units, then the movie bonus unit.
@@ -1062,7 +1062,8 @@ function renderSettings() {
   </section>
   <div class="sect" style="align-items:center;text-align:center;gap:8px">
     <p class="note">B612 版本：${APP_VERSION}</p>
-    <button class="btn small" id="chkUpd">檢查更新</button>
+    <div class="row" style="justify-content:center;gap:8px"><button class="btn small" id="chkUpd">檢查更新</button><button class="btn small" id="forceUpd">強制更新</button></div>
+    <p class="note">強制更新會清掉 App 暫存的舊檔案再重新下載，進度不會受影響。</p>
   </div>
   <section class="sect">
     ${confirmReset ? `<p>確定要清除全部進度嗎？星星、玫瑰和夕陽都會歸零，無法復原。</p>
@@ -1072,6 +1073,7 @@ function renderSettings() {
   const $ = id => document.getElementById(id);
   $("back").onclick = () => { confirmReset = false; go("home") };
   $("chkUpd").onclick = () => checkUpdate(true);
+  $("forceUpd").onclick = forceUpdate;
   const diag = () => { $("diag").textContent = `主畫面模式：${isStandalone() ? "是" : "否"} · 音訊模式：${navigator.audioSession ? navigator.audioSession.type : "不支援"} · 主引擎：${AC ? AC.state : "未建立"}` };
   diag();
   // Each test builds its own fresh audio engine inside the tap, under a different iPhone audio-session mode.
@@ -1212,5 +1214,16 @@ function showUpdate(v) {
 setTimeout(() => checkUpdate(false), 1500);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) checkUpdate(false) });
 sbInit();
-if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => { });
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  // updateViaCache "none": always fetch sw.js fresh, and re-check whenever the app comes back to the front.
+  navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then(reg => {
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) reg.update().catch(() => { }) });
+  }).catch(() => { });
+}
+async function forceUpdate() {
+  toast("正在下載最新版⋯", 4000);
+  try { const regs = await navigator.serviceWorker?.getRegistrations(); for (const r of regs || []) await r.unregister() } catch (e) { }
+  try { for (const k of await caches.keys()) await caches.delete(k) } catch (e) { }
+  location.replace(location.pathname + "?v=" + Date.now());
+}
 render();
