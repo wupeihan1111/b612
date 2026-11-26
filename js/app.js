@@ -76,8 +76,8 @@ function adoptState(o) {
 }
 
 /* ---------- 雲端同步（Supabase） ----------
-   One row per signed-in person in table "progress" (user_id, state jsonb, updated_at). Login is a 6-digit code sent by
-   email, which works inside the home-screen app (a magic link would open Safari instead). The newer copy wins. */
+   One row per signed-in person in table "progress" (user_id, state jsonb, updated_at). Login is email + password, which
+   works inside the home-screen app and needs no email at all (Supabase's "Confirm email" is turned off). The newer copy wins. */
 const SB = { client: null, user: null, state: "off", last: 0, timer: null, busy: false };
 function sbConfigured() { const c = window.B612_SUPABASE; return !!(c && c.url && c.anonKey && window.supabase) }
 function sbInit() {
@@ -966,11 +966,12 @@ function renderSettings() {
         <p class="note" id="sbStat">${sbStatusText()}</p>
         <p class="note">進度會自動同步。換裝置或用 Safari 時，用同一個 Email 登入就好。</p>
         <div class="row" style="justify-content:flex-start;gap:8px"><button class="btn small" id="sbNow">立即同步</button><button class="btn small" id="sbOut">登出</button></div>`
-      : `<p class="note">用 Email 登入一次，這個裝置的進度就會自動存到雲端。每支手機、Safari、主畫面 App 都各登入一次。</p>
-        <label for="sbEmail">Email<input type="email" id="sbEmail" autocomplete="email" inputmode="email" placeholder="you@example.com" style="font:inherit;color:var(--ink);background:#1a2048;border:3px solid var(--line);padding:8px"></label>
-        <button class="btn small" id="sbSend">寄驗證碼給我</button>
-        <label for="sbCode" id="sbCodeWrap" hidden>信裡的 6 位數驗證碼<input type="text" id="sbCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" style="font:inherit;letter-spacing:.3em;color:var(--ink);background:#1a2048;border:3px solid var(--line);padding:8px"></label>
-        <button class="btn small" id="sbVerify" hidden>登入</button>`}
+      : `<p class="note">用 Email 和密碼登入一次，這個裝置的進度就會自動存到雲端。每支手機、Safari、主畫面 App 都各登入一次，用同一組帳號密碼。</p>
+        <form id="sbForm" class="list" style="gap:10px">
+          <label for="sbEmail">Email<input type="email" id="sbEmail" autocomplete="username" inputmode="email" placeholder="you@example.com" style="font:inherit;color:var(--ink);background:#1a2048;border:3px solid var(--line);padding:8px"></label>
+          <label for="sbPass">密碼（至少 6 個字）<input type="password" id="sbPass" autocomplete="current-password" minlength="6" style="font:inherit;color:var(--ink);background:#1a2048;border:3px solid var(--line);padding:8px"></label>
+          <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap"><button class="btn small" type="submit" id="sbIn">登入</button><button class="btn small" type="button" id="sbUp">第一次使用：建立帳號</button></div>
+        </form>`}
   </section>
   <section class="sect">
     <h3>備份進度</h3>
@@ -1030,19 +1031,28 @@ function renderSettings() {
       $("sbNow").onclick = async () => { SB.state = "syncing"; $("sbStat").textContent = sbStatusText(); await sbPull(); const el = $("sbStat"); if (el) el.textContent = sbStatusText() };
       $("sbOut").onclick = async () => { await SB.client.auth.signOut(); SB.user = null; SB.last = 0; toast("已登出，進度仍保留在這個裝置上"); renderSettings() };
     } else {
-      $("sbSend").onclick = async () => {
-        const email = $("sbEmail").value.trim(); if (!/^\S+@\S+\.\S+$/.test(email)) { toast("請輸入正確的 Email"); return }
-        $("sbSend").disabled = true;
-        const { error } = await SB.client.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
-        $("sbSend").disabled = false;
-        if (error) { toast("寄送失敗：" + (error.message || "請稍後再試")); return }
-        $("sbCodeWrap").hidden = false; $("sbVerify").hidden = false; $("sbCode").focus(); toast("驗證碼已寄出，去信箱看看（可能在垃圾郵件）");
+      const creds = () => {
+        const email = $("sbEmail").value.trim(), password = $("sbPass").value;
+        if (!/^\S+@\S+\.\S+$/.test(email)) { toast("請輸入正確的 Email"); return null }
+        if (password.length < 6) { toast("密碼至少要 6 個字"); return null }
+        return { email, password };
       };
-      $("sbVerify").onclick = async () => {
-        const email = $("sbEmail").value.trim(), token = $("sbCode").value.trim();
-        const { error } = await SB.client.auth.verifyOtp({ email, token, type: "email" });
-        if (error) { toast("驗證碼不對或過期了，再寄一次試試"); return }
+      $("sbForm").onsubmit = async e => {
+        e.preventDefault(); const c = creds(); if (!c) return;
+        $("sbIn").disabled = true;
+        const { error } = await SB.client.auth.signInWithPassword(c);
+        $("sbIn").disabled = false;
+        if (error) { toast(/invalid/i.test(error.message || "") ? "Email 或密碼不對。第一次使用請按「建立帳號」" : "登入失敗：" + error.message); return }
         toast("登入成功，開始同步");
+      };
+      $("sbUp").onclick = async () => {
+        const c = creds(); if (!c) return;
+        $("sbUp").disabled = true;
+        const { data, error } = await SB.client.auth.signUp(c);
+        $("sbUp").disabled = false;
+        if (error) { toast(/registered|exists/i.test(error.message || "") ? "這個 Email 已經有帳號了，直接按「登入」" : "建立失敗：" + error.message); return }
+        if (!data.session) { toast("帳號建立了，但 Supabase 還開著「Confirm email」，請先把它關掉再登入"); return }
+        toast("帳號建立好了，開始同步");
       };
     }
   }
