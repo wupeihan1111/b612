@@ -1,6 +1,6 @@
 /* B612 單字星球 — game logic. Progress lives in this browser's localStorage, with a backup code in Settings. */
 "use strict";
-const APP_VERSION = "2026-11-27 · 主畫面音樂版";   // shown in Settings so you can tell which version the phone is running
+const APP_VERSION = "2026-11-27 · 更新按鈕版";   // keep in sync with version.json   // shown in Settings so you can tell which version the phone is running
 
 /* ---------- 題庫 ---------- */
 // Book units first (your handwritten Day 1–2), then the extra topic units, then the movie bonus unit.
@@ -1034,7 +1034,10 @@ function renderSettings() {
       <textarea id="code" placeholder="把備份碼貼在這裡"></textarea></label>
     <button class="btn small" id="restore">用備份碼還原</button>
   </section>
-  <p class="note center">B612 版本：${APP_VERSION}</p>
+  <div class="sect" style="align-items:center;text-align:center;gap:8px">
+    <p class="note">B612 版本：${APP_VERSION}</p>
+    <button class="btn small" id="chkUpd">檢查更新</button>
+  </div>
   <section class="sect">
     ${confirmReset ? `<p>確定要清除全部進度嗎？星星、玫瑰和夕陽都會歸零，無法復原。</p>
       <div class="row"><button class="btn small" id="resetNo">取消</button><button class="btn small" id="resetYes" style="background:#7a2f3e">清除全部進度</button></div>`
@@ -1042,6 +1045,7 @@ function renderSettings() {
   </section>`;
   const $ = id => document.getElementById(id);
   $("back").onclick = () => { confirmReset = false; go("home") };
+  $("chkUpd").onclick = () => checkUpdate(true);
   $("mtest").onclick = () => {
     st.music = true; save(); audioUnlocked = true; BGM.err = ""; waStop(); musicSync();
     setTimeout(() => { const m = $("mstat"); if (m) m.textContent = musicStatus() }, 800);
@@ -1132,6 +1136,28 @@ async function copyBackup(after, box) {
 function speakerSvg(s = 1) { return `<svg width="${20 * s}" height="${18 * s}" viewBox="0 0 10 9" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="0" y="3" width="2" height="3"/><rect x="2" y="2" width="1" height="5"/><rect x="3" y="1" width="1" height="7"/><rect x="4" y="0" width="1" height="9"/><rect x="6" y="3" width="1" height="3"/><rect x="7" y="2" width="1" height="1"/><rect x="7" y="6" width="1" height="1"/><rect x="8" y="1" width="1" height="1"/><rect x="8" y="7" width="1" height="1"/><rect x="9" y="2" width="1" height="5"/></g></svg>` }
 
 document.addEventListener("visibilitychange", () => { if (!document.hidden && S.today && S.today.day !== today() && (view === "home" || view === "result")) go("home") });
+/* ---------- 更新 ----------
+   version.json on the site names the newest version. When it differs from this copy, a banner offers to reload,
+   which fetches the new files (the service worker always asks the network first). Progress is untouched. */
+async function checkUpdate(manual) {
+  try {
+    const r = await fetch("version.json?t=" + Date.now(), { cache: "no-store" }); const j = await r.json();
+    if (j.v && j.v !== APP_VERSION) showUpdate(j.v);
+    else if (manual) toast("已經是最新版本了");
+  } catch (e) { if (manual) toast("沒有網路，等一下再試") }
+}
+function showUpdate(v) {
+  let b = document.getElementById("upd");
+  if (!b) { b = document.createElement("button"); b.id = "upd"; b.className = "upd"; document.body.appendChild(b) }
+  b.textContent = "✨ 有新版本（" + v + "），點這裡更新"; b.hidden = false;
+  b.onclick = async () => {
+    b.textContent = "更新中⋯";
+    try { const reg = await navigator.serviceWorker?.getRegistration(); await reg?.update() } catch (e) { }
+    location.reload();
+  };
+}
+setTimeout(() => checkUpdate(false), 1500);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkUpdate(false) });
 sbInit();
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => { });
 render();

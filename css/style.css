@@ -144,3 +144,5 @@ textarea{min-height:110px;font-family:var(--font-en);font-size:14px;resize:verti
 .mbtn.off{color:var(--muted)}
 .mbtn.off::after{content:"";position:absolute;left:6px;right:6px;top:50%;height:3px;background:var(--rose);transform:rotate(-40deg)}
 .mbtn:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.upd{position:fixed;left:50%;transform:translateX(-50%);top:calc(10px + env(safe-area-inset-top,0px));z-index:30;max-width:min(440px,calc(100% - 32px));
+  font:inherit;font-size:14px;background:var(--gold);color:#2a1d08;border:3px solid var(--line);box-shadow:0 4px 0 var(--line);padding:10px 14px;cursor:pointer}
