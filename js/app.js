@@ -1,6 +1,6 @@
 /* B612 單字星球 — game logic. Progress lives in this browser's localStorage, with a backup code in Settings. */
 "use strict";
-const APP_VERSION = "2026-11-27 · 備份提醒版";   // shown in Settings so you can tell which version the phone is running
+const APP_VERSION = "2026-11-27 · 一天一單元版";   // shown in Settings so you can tell which version the phone is running
 
 /* ---------- 題庫 ---------- */
 // Book units first (your handwritten Day 1–2), then the extra topic units, then the movie bonus unit.
@@ -84,18 +84,27 @@ function dueWords() { const t = today(); return ALL().filter(w => { const x = S.
 function seenCount() { return ALL().filter(w => ws(w.id).seen).length }
 function stars() { return ALL().filter(w => ws(w.id).s >= STAR_STAGE).length }
 function status(id) { const x = ws(id); if (!x.seen) return ["new", "還沒遇見"]; if (x.due <= today()) return ["baobab", "猴麵包樹"]; if (x.wr >= 3 && x.s < STAR_STAGE) return ["stubborn", "頑固單字"]; if (x.s >= STAR_STAGE) return ["star", "已點亮"]; return ["taming", "馴養中"] }
+/* New words never spill into the next unit within a day: the day takes what is left of the current unit
+   (40 words = one unit = both volcanoes). If only half a unit is left, the second volcano becomes a review,
+   so the next day starts cleanly on a new unit. */
+function unitPool(exclude = []) {
+  const unseen = ALL().filter(w => !ws(w.id).seen && !exclude.includes(w.id));
+  if (!unseen.length) return [];
+  const deck = unseen[0].deck;
+  return unseen.filter(w => w.deck === deck).map(w => w.id);
+}
 function ensureToday() {
   const t = today(), per = S.settings.perDay, half = Math.ceil(per / 2);
-  const unseen = ALL().filter(w => !ws(w.id).seen).map(w => w.id);
   if (S.today && S.today.day === t) {
-    // New units may have been added since this morning: refill any volcano not cleared yet, in book order.
+    // Units may have been added since this morning: refill any volcano not cleared yet, from the current unit.
     const T = S.today;
-    const v1 = T.done[0] ? T.v1 : unseen.slice(0, half);
-    const v2 = T.done[1] ? T.v2 : unseen.filter(id => !v1.includes(id)).slice(0, T.done[0] ? per - half : per - v1.length);
+    const v1 = T.done[0] ? T.v1 : unitPool().slice(0, half);
+    const v2 = T.done[1] ? T.v2 : unitPool(v1).slice(0, T.done[0] ? per - half : per - v1.length);
     if (v1.join() !== T.v1.join() || v2.join() !== T.v2.join()) { T.v1 = v1; T.v2 = v2; save() }
     return;
   }
-  S.today = { day: t, v1: unseen.slice(0, half), v2: unseen.slice(half, per), done: [false, false, false] };
+  const pool = unitPool();
+  S.today = { day: t, v1: pool.slice(0, half), v2: pool.slice(half, per), done: [false, false, false] };
   save();
 }
 function streak() { const set = new Set(S.sunsets); let d = today(); if (!set.has(d)) d--; let n = 0; while (set.has(d)) { n++; d-- } return n }
@@ -543,6 +552,10 @@ function renderHome() {
       <span><span class="t">${v.t}</span><br><span class="s">${esc(v.s)}</span></span>
       <span class="tag ${T.done[i] ? "clean" : v.lock ? "lock" : "smoke"}">${T.done[i] ? "已清理" : v.lock ? (i === 1 ? "先清第一座" : "先學新字") : "冒煙中"}</span>
     </button>`).join("")}
+    ${bonusIds().length ? `<button class="btn vol" data-vol="4">
+      <canvas width="24" height="14" style="width:48px;height:28px" data-icon="4"></canvas>
+      <span><span class="t">加碼 · 讀完 ${esc(deckTitle(byId(bonusIds()[0]).deck))}</span><br><span class="s">還剩 ${bonusIds().length} 個新字，清完明天就從新單元開始</span></span>
+      <span class="tag smoke">可選</span></button>` : ""}
     ${T.done[2] && due ? `<button class="btn vol" data-vol="3">
       <canvas width="24" height="14" style="width:48px;height:28px" data-icon="3"></canvas>
       <span><span class="t">拔猴麵包樹</span><br><span class="s">還有 ${due} 棵，每次拔 15 棵</span></span>
@@ -575,11 +588,18 @@ function renderHome() {
 }
 
 /* ---------- 清火山（一回合） ---------- */
+function deckTitle(id) { const d = DECKS.find(d => d.id === id); return d ? d.title.split(" · ")[0] : "我的單字" }
+// After both new-word volcanoes, if today's unit still has words left, offer them so tomorrow starts on a fresh unit.
+function bonusIds() {
+  const T = S.today; if (!T.done[1] || !T.v2.length) return [];
+  const lastDeck = byId(T.v2[T.v2.length - 1]).deck;
+  return unitPool().filter(id => byId(id).deck === lastDeck).slice(0, Math.ceil(S.settings.perDay / 2));
+}
 function startSession(kind) {
   const T = S.today;
   SES = { kind, first: {}, retries: {}, right: 0, wrong: 0, newStars: 0, combo: 0, best: 0, mode: {}, q: [], cur: null, answered: false };
-  if (kind < 2) {
-    const ids = kind === 0 ? T.v1 : T.v2;
+  if (kind < 2 || kind === 4) {
+    const ids = kind === 0 ? T.v1 : kind === 1 ? T.v2 : bonusIds();
     if (ids.length) {
       ids.forEach(id => SES.mode[id] = "new");
       SES.chunks = []; for (let i = 0; i < ids.length; i += 5) SES.chunks.push(ids.slice(i, i + 5));
@@ -718,6 +738,7 @@ function hookHtml(w, coach) { const h = w.hook; return `<div class="hook">${coac
 function finishSession() {
   const T = S.today, t = today();
   if (SES.kind < 3) T.done[SES.kind] = true;
+  if (SES.kind === 4) T.v2 = T.v2.concat(Object.keys(SES.mode));
   const firstSunset = !S.sunsets.includes(t);
   if (firstSunset) S.sunsets.push(t);
   T.stars = (T.stars || 0) + SES.newStars;
@@ -728,10 +749,11 @@ function finishSession() {
   SES = null; go("result");
 }
 function renderResult() {
-  const r = lastResult; const names = ["第一座活火山", "第二座活火山", "死火山", "猴麵包樹"];
+  const r = lastResult; const names = ["第一座活火山", "第二座活火山", "死火山", "猴麵包樹", "加碼火山"];
   const stage = Math.max(1, r.stage);
   let big, note;
   if (r.kind === 3) { big = "做得好"; note = "猴麵包樹越少，B612 越安全。" }
+  else if (r.kind === 4) { big = "單元讀完了"; note = "明天開始，一天剛好一個單元。" }
   else if (stage === 3) { big = "今天的夕陽落下了"; note = `三座火山都清好了${r.dayStars ? `，今天點亮了 ${r.dayStars} 顆新星星` : "，今晚的星空屬於你"}。離考試還有 ${daysLeft()} 天。` }
   else if (r.firstSunset) { big = `第 ${r.n} 次夕陽`; note = `小王子曾經在一天裡看了 44 次夕陽。離考試還有 ${daysLeft()} 天。` }
   else { big = "夕陽更低了"; note = "今天還剩一座火山，清完就能看到今晚的星空。" }
