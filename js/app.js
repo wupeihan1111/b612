@@ -1,6 +1,6 @@
 /* B612 單字星球 — game logic. Progress lives in this browser's localStorage, with a backup code in Settings. */
 "use strict";
-const APP_VERSION = "2026-11-27 · 一天一單元版";   // shown in Settings so you can tell which version the phone is running
+const APP_VERSION = "2026-11-27 · 雲端同步版";   // shown in Settings so you can tell which version the phone is running
 
 /* ---------- 題庫 ---------- */
 // Book units first (your handwritten Day 1–2), then the extra topic units, then the movie bonus unit.
@@ -60,17 +60,73 @@ const LS = "b612.v2";
 function fresh() { return { v: 2, words: {}, today: null, sunsets: [], visited: [], foxDays: [], landing: null, settings: { perDay: 40, rate: 0.9, voice: "", sfx: true, foxHour: 21, music: true, musicVol: 0.5, musicSrc: "chip", musicName: "" }, custom: [], installHidden: false, updatedAt: 0 } }
 function load() { try { const r = localStorage.getItem(LS); if (r) { const o = JSON.parse(r); return Object.assign(fresh(), o, { settings: Object.assign(fresh().settings, o.settings) }) } } catch (e) { } return fresh() }
 let S = load();
-function save() { S.updatedAt = Date.now(); try { localStorage.setItem(LS, JSON.stringify(S)) } catch (e) { toast("存檔失敗：瀏覽器不允許儲存資料，請關閉無痕模式。") } }
+function save() { S.updatedAt = Date.now(); try { localStorage.setItem(LS, JSON.stringify(S)) } catch (e) { toast("存檔失敗：瀏覽器不允許儲存資料，請關閉無痕模式。") } sbSchedulePush() }
 function exportCode() { return btoa(unescape(encodeURIComponent(JSON.stringify(S)))) }
 function importCode(code) {
   const o = JSON.parse(decodeURIComponent(escape(atob(code.trim()))));
   if (!o || typeof o !== "object" || !o.words) throw new Error("bad");
-  // Sound settings belong to this phone (its voices, its music file), so a backup from elsewhere keeps them as they are here.
+  adoptState(o); S.lastBackup = Date.now(); save();
+}
+// Sound settings belong to this device (its voices, its music file), so progress from elsewhere keeps them as they are here.
+function adoptState(o) {
   const local = S.settings, keep = ["music", "musicVol", "musicSrc", "musicName", "voice", "rate", "sfx"];
   const settings = Object.assign(fresh().settings, o.settings);
   keep.forEach(k => settings[k] = local[k]);
-  S = Object.assign(fresh(), o, { settings, installHidden: S.installHidden }); S.lastBackup = Date.now(); save();
+  S = Object.assign(fresh(), o, { settings, installHidden: S.installHidden, lastBackup: S.lastBackup });
 }
+
+/* ---------- 雲端同步（Supabase） ----------
+   One row per signed-in person in table "progress" (user_id, state jsonb, updated_at). Login is a 6-digit code sent by
+   email, which works inside the home-screen app (a magic link would open Safari instead). The newer copy wins. */
+const SB = { client: null, user: null, state: "off", last: 0, timer: null, busy: false };
+function sbConfigured() { const c = window.B612_SUPABASE; return !!(c && c.url && c.anonKey && window.supabase) }
+function sbInit() {
+  if (!sbConfigured()) return;
+  try {
+    const c = window.B612_SUPABASE;
+    SB.client = window.supabase.createClient(c.url, c.anonKey, { auth: { persistSession: true, autoRefreshToken: true, storageKey: "b612.auth" } });
+    SB.client.auth.onAuthStateChange((ev, session) => {
+      const was = SB.user; SB.user = session ? session.user : null;
+      if (SB.user && !was) sbPull();
+      if (view === "settings") renderSettings();
+    });
+  } catch (e) { SB.client = null }
+}
+function sbSafeToSwap() { return view !== "learn" && view !== "quiz" && view !== "land" }
+async function sbPull() {
+  if (!SB.client || !SB.user || SB.busy) return;
+  SB.busy = true; SB.state = "syncing";
+  try {
+    const { data, error } = await SB.client.from("progress").select("state").eq("user_id", SB.user.id).maybeSingle();
+    if (error) throw error;
+    const remote = data && data.state;
+    if (remote && (remote.updatedAt || 0) > (S.updatedAt || 0) && sbSafeToSwap()) {
+      adoptState(remote); byIdCache.clear();
+      try { localStorage.setItem(LS, JSON.stringify(S)) } catch (e) { }
+      SB.state = "ok"; SB.last = Date.now(); SB.busy = false; render(); toast("已從雲端載入最新進度", 1800); return;
+    }
+    SB.busy = false;
+    if (!remote || (S.updatedAt || 0) > (remote.updatedAt || 0)) await sbPush(); else { SB.state = "ok"; SB.last = Date.now() }
+  } catch (e) { SB.state = "error"; SB.busy = false }
+}
+async function sbPush() {
+  if (!SB.client || !SB.user) return;
+  try {
+    const { error } = await SB.client.from("progress").upsert({ user_id: SB.user.id, state: S, updated_at: new Date().toISOString() });
+    if (error) throw error;
+    SB.state = "ok"; SB.last = Date.now();
+  } catch (e) { SB.state = "error" }
+  if (view === "settings") { const el = document.getElementById("sbStat"); if (el) el.textContent = sbStatusText() }
+}
+function sbSchedulePush() { if (!SB.user) return; clearTimeout(SB.timer); SB.timer = setTimeout(sbPush, 1500) }
+function sbStatusText() {
+  if (SB.state === "syncing") return "同步中⋯";
+  if (SB.state === "error") return "這次同步失敗（可能沒有網路），有網路時會再試。";
+  if (SB.last) return "已同步 · " + new Date(SB.last).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" });
+  return "等待同步";
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) sbPull(); else if (SB.user) { clearTimeout(SB.timer); sbPush() } });
+window.addEventListener("online", () => sbPull());
 
 /* ---------- 單字與記憶狀態 ---------- */
 function ALL() { return BOOK_WORDS.concat(S.custom || []) }
@@ -159,13 +215,12 @@ function audio() {
 let audioUnlocked = false;
 function rebuildAudio() {
   // iPhone sometimes leaves the audio engine stuck "interrupted" after switching apps; start a fresh one.
-  try { clearInterval(BGM.timer); BGM.timer = null; if (BGM.el) BGM.el.pause(); AC && AC.close() } catch (e) { }
-  AC = null; BGM.bus = BGM.duck = BGM.el = BGM.src = null; BGM.playing = null; if (BGM.url) { URL.revokeObjectURL(BGM.url); BGM.url = null }
-  audio(); musicSync();
+  try { AC && AC.close() } catch (e) { }
+  AC = null; audio();
 }
 function unlockAudio() {
   const ac = audio(); if (!ac) return;
-  if (!audioUnlocked) { audioUnlocked = true; setTimeout(musicSync, 0) }
+  audioUnlocked = true; musicSync();   // inside the tap, so the music element is allowed to start
   if (ac.state !== "running") ac.resume().then(() => { if (ac.state === "running") musicSync() }).catch(() => { }).finally(() => setTimeout(() => { if (AC === ac && ac.state !== "running") rebuildAudio() }, 400));
   try { const s = ac.createBufferSource(); s.buffer = ac.createBuffer(1, 1, 22050); s.connect(ac.destination); s.start(0) } catch (e) { }
 }
@@ -197,58 +252,53 @@ const SONG = [   // [bass, chord tones, melody [step, midi, length in eighths]] 
   [43, [59, 62], [[0, 79, 6]]],
   [43, [59, 62], [[2, 71, 1], [3, 74, 1], [4, 79, 2]]],
 ];
-const BGM = { bus: null, duck: null, timer: null, step: 0, next: 0, playing: null, el: null, src: null, blob: null, url: null, night: false };
-function musicBus() {
-  const ac = audio(); if (!ac) return null;
-  if (!BGM.bus) { BGM.duck = ac.createGain(); BGM.duck.connect(ac.destination); BGM.bus = ac.createGain(); BGM.bus.gain.value = 0; BGM.bus.connect(BGM.duck) }
-  return BGM.bus;
-}
-function tone(ac, t, midi, dur, type, gain) {
-  const o = ac.createOscillator(), g = ac.createGain();
+/* The waltz is rendered once into a WAV file and looped by a plain <audio> element: home-screen web apps on iPhone
+   play media elements reliably, while live Web Audio synthesis there often stays silent. */
+const BGM = { el: null, chipUrl: [null, null], blob: null, customUrl: null, night: false, ducked: false };
+function renderTone(ctx, dest, t, midi, dur, type, gain) {
+  const o = ctx.createOscillator(), g = ctx.createGain();
   o.type = type; o.frequency.setValueAtTime(440 * Math.pow(2, (midi - 69) / 12), t);
   g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  o.connect(g).connect(BGM.bus); o.start(t); o.stop(t + dur + 0.05);
+  o.connect(g).connect(dest); o.start(t); o.stop(t + dur + 0.05);
 }
-function chipStep(ac, i, t, sd) {
-  const [bass, chord, mel] = SONG[Math.floor(i / 6) % SONG.length], s = i % 6;
-  if (s === 0) tone(ac, t, bass, sd * 5, "triangle", 0.08);
-  if (!BGM.night && (s === 2 || s === 4)) chord.forEach(m => tone(ac, t, m, sd * 1.4, "sine", 0.025));
-  mel.forEach(([st, m, len]) => { if (st === s) { tone(ac, t, BGM.night ? m - 12 : m, Math.max(0.5, len * sd * 1.6), "triangle", 0.075); if (!BGM.night) tone(ac, t, m + 12, 0.35, "sine", 0.012) } });
+function wavUrl(buf) {
+  const d = buf.getChannelData(0), n = d.length; let peak = 0.0001; for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(d[i]));
+  const k = 0.8 / peak, ab = new ArrayBuffer(44 + n * 2), v = new DataView(ab), w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)) };
+  w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, buf.sampleRate, true); v.setUint32(28, buf.sampleRate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, "data"); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, d[i] * k)) * 32767, true);
+  return URL.createObjectURL(new Blob([ab], { type: "audio/wav" }));
 }
-function chipStart() {
-  const ac = audio(); if (!ac || BGM.timer) return;
-  BGM.next = ac.currentTime + 0.1;
-  BGM.timer = setInterval(() => {
-    const sd = BGM.night ? 0.44 : 0.33;
-    while (BGM.next < ac.currentTime + 0.3) { chipStep(ac, BGM.step, BGM.next, sd); BGM.next += sd; BGM.step = (BGM.step + 1) % (SONG.length * 6) }
-  }, 60);
+function renderSong(night) {
+  const OC = window.OfflineAudioContext || window.webkitOfflineAudioContext; if (!OC) return Promise.resolve(null);
+  const sr = 22050, sd = night ? 0.44 : 0.33, steps = SONG.length * 6, len = steps * sd;
+  const ctx = new OC(1, Math.ceil(sr * len), sr);
+  for (let i = 0; i < steps; i++) {
+    const [bass, chord, mel] = SONG[Math.floor(i / 6)], st = i % 6, t = i * sd;
+    if (st === 0) renderTone(ctx, ctx.destination, t, bass, sd * 5, "triangle", 0.08);
+    if (!night && (st === 2 || st === 4)) chord.forEach(m => renderTone(ctx, ctx.destination, t, m, sd * 1.4, "sine", 0.025));
+    mel.forEach(([s0, m, l]) => { if (s0 === st) { renderTone(ctx, ctx.destination, t, night ? m - 12 : m, Math.max(0.5, l * sd * 1.6), "triangle", 0.075); if (!night) renderTone(ctx, ctx.destination, t, m + 12, 0.35, "sine", 0.012) } });
+  }
+  const p = ctx.startRendering();
+  return (p && p.then ? p : new Promise(res => { ctx.oncomplete = e => res(e.renderedBuffer) })).then(wavUrl).catch(() => null);
 }
-function chipStop() { clearInterval(BGM.timer); BGM.timer = null }
+renderSong(false).then(u => { BGM.chipUrl[0] = u; musicSync(); return renderSong(true) }).then(u => { BGM.chipUrl[1] = u; musicSync() });
 function customReady() { return S.settings.musicSrc === "custom" && BGM.blob }
-function customStart() {
-  const ac = audio(); if (!ac) return;
-  if (!BGM.el) { BGM.el = new Audio(); BGM.el.loop = true; BGM.el.setAttribute("playsinline", ""); BGM.src = ac.createMediaElementSource(BGM.el); BGM.src.connect(BGM.bus) }
-  if (!BGM.url) { BGM.url = URL.createObjectURL(BGM.blob); BGM.el.src = BGM.url }
-  BGM.el.play().catch(() => { });
-}
 function musicWanted() { return S.settings.music && audioUnlocked && !document.hidden && view !== "learn" && view !== "quiz" }
 function musicSync() {
-  const ac = audio(); const bus = musicBus(); if (!ac || !bus) return;
   BGM.night = !!(S.today && skyStage() === 3);
-  const want = musicWanted(), kind = customReady() ? "custom" : "chip";
-  if (want) {
-    if (BGM.playing && BGM.playing !== kind) { BGM.playing === "chip" ? chipStop() : BGM.el && BGM.el.pause() }
-    kind === "chip" ? chipStart() : customStart();
-    BGM.playing = kind;
-    bus.gain.cancelScheduledValues(ac.currentTime); bus.gain.setTargetAtTime(S.settings.musicVol * (kind === "chip" ? 1 : 0.9), ac.currentTime, 0.5);
-  } else if (BGM.playing) {
-    bus.gain.cancelScheduledValues(ac.currentTime); bus.gain.setTargetAtTime(0, ac.currentTime, 0.25);
-    const was = BGM.playing; BGM.playing = null;
-    setTimeout(() => { if (BGM.playing) return; was === "chip" ? chipStop() : BGM.el && BGM.el.pause() }, 1200);
-  }
+  if (!BGM.el) { BGM.el = new Audio(); BGM.el.loop = true; BGM.el.setAttribute("playsinline", ""); BGM.el.preload = "auto" }
+  const el = BGM.el;
+  if (customReady() && !BGM.customUrl) BGM.customUrl = URL.createObjectURL(BGM.blob);
+  const src = customReady() ? BGM.customUrl : (BGM.chipUrl[BGM.night ? 1 : 0] || BGM.chipUrl[0]);
+  if (musicWanted() && src) {
+    if (el.dataset.src !== src) { el.src = src; el.dataset.src = src }
+    el.volume = Math.min(1, S.settings.musicVol * (BGM.ducked ? 0.3 : 1));
+    if (el.paused) el.play().catch(() => { });
+  } else if (!el.paused) el.pause();
   const mb = document.getElementById("mbtn"); if (mb) { mb.classList.toggle("off", !S.settings.music); mb.setAttribute("aria-pressed", String(S.settings.music)) }
 }
-function musicDuck(on) { if (!BGM.duck || !AC) return; BGM.duck.gain.setTargetAtTime(on ? 0.25 : 1, AC.currentTime, 0.1) }
+function musicDuck(on) { BGM.ducked = on; if (BGM.el) BGM.el.volume = Math.min(1, S.settings.musicVol * (on ? 0.3 : 1)) }
 function idb() { return new Promise((res, rej) => { const r = indexedDB.open("b612", 1); r.onupgradeneeded = () => r.result.createObjectStore("files"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) }) }
 function idbDo(mode, fn) { return idb().then(db => new Promise((res, rej) => { const q = fn(db.transaction("files", mode).objectStore("files")); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error) })) }
 if (S.settings.musicName) idbDo("readonly", st => st.get("bgm")).then(b => { if (b) { BGM.blob = b; musicSync() } }).catch(() => { });
@@ -883,7 +933,7 @@ function renderSettings() {
   <section class="sect">
     <h3>背景音樂</h3>
     <label style="flex-direction:row;align-items:center;gap:8px" for="mus"><input type="checkbox" id="mus" ${st.music ? "checked" : ""}> 播放背景音樂（清火山時會自動暫停）</label>
-    <label for="mvol">音量 <input type="range" id="mvol" min="0.1" max="1" step="0.05" value="${st.musicVol}"></label>
+    <label for="mvol">音量（iPhone 請用側邊音量鍵調整） <input type="range" id="mvol" min="0.1" max="1" step="0.05" value="${st.musicVol}"></label>
     <label for="msrc">曲目
       <select id="msrc"><option value="chip" ${st.musicSrc !== "custom" ? "selected" : ""}>B612 原創小曲（8-bit 音樂盒）</option>${st.musicName ? `<option value="custom" ${st.musicSrc === "custom" ? "selected" : ""}>我的音樂：${esc(st.musicName)}</option>` : ""}</select></label>
     <div class="row" style="justify-content:flex-start;flex-wrap:wrap"><label class="btn small" for="mfile" style="display:inline-block;cursor:pointer">選擇手機裡的音樂檔</label>
@@ -910,6 +960,19 @@ function renderSettings() {
     <p class="note" id="impMsg">目前自己加的單字：${(S.custom || []).length} 個</p>
   </section>
   <section class="sect">
+    <h3>雲端同步</h3>
+    ${!sbConfigured() ? `<p class="note">還沒設定雲端同步（需要先建立 Supabase 專案）。設定好之後，手機、Safari、電腦都會是同一份進度。</p>`
+      : SB.user ? `<p>已登入：<span class="en">${esc(SB.user.email || "")}</span></p>
+        <p class="note" id="sbStat">${sbStatusText()}</p>
+        <p class="note">進度會自動同步。換裝置或用 Safari 時，用同一個 Email 登入就好。</p>
+        <div class="row" style="justify-content:flex-start;gap:8px"><button class="btn small" id="sbNow">立即同步</button><button class="btn small" id="sbOut">登出</button></div>`
+      : `<p class="note">用 Email 登入一次，這個裝置的進度就會自動存到雲端。每支手機、Safari、主畫面 App 都各登入一次。</p>
+        <label for="sbEmail">Email<input type="email" id="sbEmail" autocomplete="email" inputmode="email" placeholder="you@example.com" style="font:inherit;color:var(--ink);background:#1a2048;border:3px solid var(--line);padding:8px"></label>
+        <button class="btn small" id="sbSend">寄驗證碼給我</button>
+        <label for="sbCode" id="sbCodeWrap" hidden>信裡的 6 位數驗證碼<input type="text" id="sbCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" style="font:inherit;letter-spacing:.3em;color:var(--ink);background:#1a2048;border:3px solid var(--line);padding:8px"></label>
+        <button class="btn small" id="sbVerify" hidden>登入</button>`}
+  </section>
+  <section class="sect">
     <h3>備份進度</h3>
     <p class="note">進度存在這支手機的瀏覽器裡。換手機或怕被清掉時，先複製備份碼存到備忘錄，之後貼回來就能還原。</p>
     <div class="row" style="justify-content:flex-start"><button class="btn small" id="copyCode">複製備份碼</button></div>
@@ -934,15 +997,14 @@ function renderSettings() {
     if (f.size > 30 * 1024 * 1024) { toast("檔案太大了，請選 30MB 以下的音樂檔"); return }
     try {
       await idbDo("readwrite", s2 => s2.put(f, "bgm"));
-      BGM.blob = f; if (BGM.url) { URL.revokeObjectURL(BGM.url); BGM.url = null }
-      if (BGM.el) { BGM.el.pause(); BGM.el.removeAttribute("src") }
+      BGM.blob = f; if (BGM.customUrl) { URL.revokeObjectURL(BGM.customUrl); BGM.customUrl = null }
       st.musicName = f.name.replace(/\.[^.]+$/, ""); st.musicSrc = "custom"; st.music = true; save();
       toast("已換成你的音樂"); renderSettings(); musicSync();
     } catch (err) { toast("這個檔案沒辦法存進來，換一個音樂檔試試") }
   };
   const md = $("mdel"); if (md) md.onclick = async () => {
     try { await idbDo("readwrite", s2 => s2.delete("bgm")) } catch (err) { }
-    if (BGM.el) BGM.el.pause(); BGM.blob = null; if (BGM.url) { URL.revokeObjectURL(BGM.url); BGM.url = null }
+    BGM.blob = null; if (BGM.customUrl) { URL.revokeObjectURL(BGM.customUrl); BGM.customUrl = null }
     st.musicName = ""; st.musicSrc = "chip"; save(); renderSettings(); musicSync();
   };
   $("foxh").onchange = e => { st.foxHour = +e.target.value; save(); toast(`狐狸會在 ${st.foxHour}:00 等你`) };
@@ -963,6 +1025,27 @@ function renderSettings() {
     });
     save(); byIdCache.clear(); $("imp").value = ""; $("impMsg").textContent = `加入了 ${n} 個新單字，會排進之後的活火山。目前自己加的單字：${S.custom.length} 個`;
   };
+  if (sbConfigured()) {
+    if (SB.user) {
+      $("sbNow").onclick = async () => { SB.state = "syncing"; $("sbStat").textContent = sbStatusText(); await sbPull(); const el = $("sbStat"); if (el) el.textContent = sbStatusText() };
+      $("sbOut").onclick = async () => { await SB.client.auth.signOut(); SB.user = null; SB.last = 0; toast("已登出，進度仍保留在這個裝置上"); renderSettings() };
+    } else {
+      $("sbSend").onclick = async () => {
+        const email = $("sbEmail").value.trim(); if (!/^\S+@\S+\.\S+$/.test(email)) { toast("請輸入正確的 Email"); return }
+        $("sbSend").disabled = true;
+        const { error } = await SB.client.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
+        $("sbSend").disabled = false;
+        if (error) { toast("寄送失敗：" + (error.message || "請稍後再試")); return }
+        $("sbCodeWrap").hidden = false; $("sbVerify").hidden = false; $("sbCode").focus(); toast("驗證碼已寄出，去信箱看看（可能在垃圾郵件）");
+      };
+      $("sbVerify").onclick = async () => {
+        const email = $("sbEmail").value.trim(), token = $("sbCode").value.trim();
+        const { error } = await SB.client.auth.verifyOtp({ email, token, type: "email" });
+        if (error) { toast("驗證碼不對或過期了，再寄一次試試"); return }
+        toast("登入成功，開始同步");
+      };
+    }
+  }
   $("copyCode").onclick = () => copyBackup(null, $("code"));
   $("restore").onclick = () => { try { importCode($("code").value); byIdCache.clear(); toast("進度已還原"); go("home") } catch (e) { toast("備份碼看起來不完整，請重新複製一次") } };
   if (confirmReset) { $("resetNo").onclick = () => { confirmReset = false; renderSettings() }; $("resetYes").onclick = () => { const keep = S.settings; S = fresh(); S.settings = keep; S.installHidden = true; confirmReset = false; save(); go("home") } }
@@ -970,7 +1053,7 @@ function renderSettings() {
 }
 
 function noteSvg() { return `<svg width="20" height="20" viewBox="0 0 10 10" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="4" y="1" width="1" height="6"/><rect x="5" y="1" width="3" height="1"/><rect x="7" y="2" width="1" height="4"/><rect x="2" y="6" width="3" height="2"/><rect x="5" y="5" width="3" height="2"/></g><rect class="slash" x="0" y="0" width="1" height="1" fill="none"/></svg>` }
-function needBackup() { return seenCount() > 0 && Date.now() - (S.lastBackup || 0) > 3 * 864e5 }
+function needBackup() { return !SB.user && seenCount() > 0 && Date.now() - (S.lastBackup || 0) > 3 * 864e5 }
 async function copyBackup(after, box) {
   const code = exportCode();
   try { await navigator.clipboard.writeText(code); S.lastBackup = Date.now(); save(); toast("備份碼已複製，貼到備忘錄保存吧"); after && after() }
@@ -982,5 +1065,6 @@ async function copyBackup(after, box) {
 function speakerSvg(s = 1) { return `<svg width="${20 * s}" height="${18 * s}" viewBox="0 0 10 9" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="0" y="3" width="2" height="3"/><rect x="2" y="2" width="1" height="5"/><rect x="3" y="1" width="1" height="7"/><rect x="4" y="0" width="1" height="9"/><rect x="6" y="3" width="1" height="3"/><rect x="7" y="2" width="1" height="1"/><rect x="7" y="6" width="1" height="1"/><rect x="8" y="1" width="1" height="1"/><rect x="8" y="7" width="1" height="1"/><rect x="9" y="2" width="1" height="5"/></g></svg>` }
 
 document.addEventListener("visibilitychange", () => { if (!document.hidden && S.today && S.today.day !== today() && (view === "home" || view === "result")) go("home") });
+sbInit();
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => { });
 render();
