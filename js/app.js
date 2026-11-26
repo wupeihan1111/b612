@@ -1,6 +1,6 @@
 /* B612 單字星球 — game logic. Progress lives in this browser's localStorage, with a backup code in Settings. */
 "use strict";
-const APP_VERSION = "2026-11-27 · 雲端同步版";   // shown in Settings so you can tell which version the phone is running
+const APP_VERSION = "2026-11-27 · 同步合併版";   // shown in Settings so you can tell which version the phone is running
 
 /* ---------- 題庫 ---------- */
 // Book units first (your handwritten Day 1–2), then the extra topic units, then the movie bonus unit.
@@ -93,20 +93,50 @@ function sbInit() {
   } catch (e) { SB.client = null }
 }
 function sbSafeToSwap() { return view !== "learn" && view !== "quiz" && view !== "land" }
+/* Merge two copies of the progress instead of letting one replace the other, so an empty or older device can never
+   wipe out real progress. Per word: a seen word beats an unseen one, then the more recent answer wins. Lists such as
+   sunsets and souvenirs are combined. This device keeps its own sound settings. */
+function mergeStates(a, b) {
+  const out = Object.assign(fresh(), a), words = {};
+  const ids = new Set([...Object.keys(a.words || {}), ...Object.keys(b.words || {})]);
+  ids.forEach(id => {
+    const x = (a.words || {})[id], y = (b.words || {})[id];
+    if (!x || !y) { words[id] = x || y; return }
+    if (!!x.seen !== !!y.seen) { words[id] = x.seen ? x : y; return }
+    const tx = x.t || 0, ty = y.t || 0;
+    words[id] = tx !== ty ? (tx > ty ? x : y) : ((x.s || 0) * 100 + (x.wr || 0) >= (y.s || 0) * 100 + (y.wr || 0) ? x : y);
+  });
+  out.words = words;
+  const uni = (p, q) => [...new Set([...(p || []), ...(q || [])])].sort((m, n) => (m > n ? 1 : m < n ? -1 : 0));
+  out.sunsets = uni(a.sunsets, b.sunsets); out.foxDays = uni(a.foxDays, b.foxDays); out.visited = uni(a.visited, b.visited);
+  const cust = {}; [...(a.custom || []), ...(b.custom || [])].forEach(c => { cust[c.w.toLowerCase()] = cust[c.w.toLowerCase()] || c }); out.custom = Object.values(cust);
+  const ta = a.today, tb = b.today;
+  if (ta && tb && ta.day === tb.day) {
+    const pick = tb.done.filter(Boolean).length > ta.done.filter(Boolean).length ? tb : ta;
+    out.today = Object.assign({}, pick, { done: ta.done.map((d, i) => d || tb.done[i]), stars: Math.max(ta.stars || 0, tb.stars || 0) });
+  } else out.today = (!ta || (tb && tb.day > ta.day)) ? tb : ta;
+  out.settings = a.settings; out.landing = a.landing; out.installHidden = a.installHidden;
+  out.lastBackup = Math.max(a.lastBackup || 0, b.lastBackup || 0);
+  out.updatedAt = Math.max(a.updatedAt || 0, b.updatedAt || 0);
+  return out;
+}
+const syncKey = st => JSON.stringify([st.words, st.sunsets, st.foxDays, st.visited, st.custom, st.today]);
 async function sbPull() {
-  if (!SB.client || !SB.user || SB.busy) return;
+  if (!SB.client || !SB.user || SB.busy || !sbSafeToSwap()) return;
   SB.busy = true; SB.state = "syncing";
   try {
     const { data, error } = await SB.client.from("progress").select("state").eq("user_id", SB.user.id).maybeSingle();
     if (error) throw error;
     const remote = data && data.state;
-    if (remote && (remote.updatedAt || 0) > (S.updatedAt || 0) && sbSafeToSwap()) {
-      adoptState(remote); byIdCache.clear();
+    const merged = remote ? mergeStates(S, remote) : S;
+    const localChanged = syncKey(merged) !== syncKey(S), remoteChanged = !remote || syncKey(merged) !== syncKey(remote);
+    if (localChanged && sbSafeToSwap()) {
+      S = merged; byIdCache.clear();
       try { localStorage.setItem(LS, JSON.stringify(S)) } catch (e) { }
-      SB.state = "ok"; SB.last = Date.now(); SB.busy = false; render(); toast("已從雲端載入最新進度", 1800); return;
+      render(); toast("已合併雲端的進度", 1800);
     }
     SB.busy = false;
-    if (!remote || (S.updatedAt || 0) > (remote.updatedAt || 0)) await sbPush(); else { SB.state = "ok"; SB.last = Date.now() }
+    if (remoteChanged) await sbPush(); else { SB.state = "ok"; SB.last = Date.now() }
   } catch (e) { SB.state = "error"; SB.busy = false }
 }
 async function sbPush() {
@@ -118,14 +148,14 @@ async function sbPush() {
   } catch (e) { SB.state = "error" }
   if (view === "settings") { const el = document.getElementById("sbStat"); if (el) el.textContent = sbStatusText() }
 }
-function sbSchedulePush() { if (!SB.user) return; clearTimeout(SB.timer); SB.timer = setTimeout(sbPush, 1500) }
+function sbSchedulePush() { if (!SB.user) return; clearTimeout(SB.timer); SB.timer = setTimeout(sbPull, 1500) }   // pull-merge-push, never a blind overwrite
 function sbStatusText() {
   if (SB.state === "syncing") return "同步中⋯";
   if (SB.state === "error") return "這次同步失敗（可能沒有網路），有網路時會再試。";
   if (SB.last) return "已同步 · " + new Date(SB.last).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" });
   return "等待同步";
 }
-document.addEventListener("visibilitychange", () => { if (!document.hidden) sbPull(); else if (SB.user) { clearTimeout(SB.timer); sbPush() } });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) sbPull(); else if (SB.user) { clearTimeout(SB.timer); sbPull() } });
 window.addEventListener("online", () => sbPull());
 
 /* ---------- 單字與記憶狀態 ---------- */
@@ -252,51 +282,35 @@ const SONG = [   // [bass, chord tones, melody [step, midi, length in eighths]] 
   [43, [59, 62], [[0, 79, 6]]],
   [43, [59, 62], [[2, 71, 1], [3, 74, 1], [4, 79, 2]]],
 ];
-/* The waltz is rendered once into a WAV file and looped by a plain <audio> element: home-screen web apps on iPhone
-   play media elements reliably, while live Web Audio synthesis there often stays silent. */
-const BGM = { el: null, chipUrl: [null, null], blob: null, customUrl: null, night: false, ducked: false };
-function renderTone(ctx, dest, t, midi, dur, type, gain) {
-  const o = ctx.createOscillator(), g = ctx.createGain();
-  o.type = type; o.frequency.setValueAtTime(440 * Math.pow(2, (midi - 69) / 12), t);
-  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  o.connect(g).connect(dest); o.start(t); o.stop(t + dur + 0.05);
-}
-function wavUrl(buf) {
-  const d = buf.getChannelData(0), n = d.length; let peak = 0.0001; for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(d[i]));
-  const k = 0.8 / peak, ab = new ArrayBuffer(44 + n * 2), v = new DataView(ab), w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)) };
-  w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-  v.setUint32(24, buf.sampleRate, true); v.setUint32(28, buf.sampleRate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, "data"); v.setUint32(40, n * 2, true);
-  for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, d[i] * k)) * 32767, true);
-  return URL.createObjectURL(new Blob([ab], { type: "audio/wav" }));
-}
-function renderSong(night) {
-  const OC = window.OfflineAudioContext || window.webkitOfflineAudioContext; if (!OC) return Promise.resolve(null);
-  const sr = 22050, sd = night ? 0.44 : 0.33, steps = SONG.length * 6, len = steps * sd;
-  const ctx = new OC(1, Math.ceil(sr * len), sr);
-  for (let i = 0; i < steps; i++) {
-    const [bass, chord, mel] = SONG[Math.floor(i / 6)], st = i % 6, t = i * sd;
-    if (st === 0) renderTone(ctx, ctx.destination, t, bass, sd * 5, "triangle", 0.08);
-    if (!night && (st === 2 || st === 4)) chord.forEach(m => renderTone(ctx, ctx.destination, t, m, sd * 1.4, "sine", 0.025));
-    mel.forEach(([s0, m, l]) => { if (s0 === st) { renderTone(ctx, ctx.destination, t, night ? m - 12 : m, Math.max(0.5, l * sd * 1.6), "triangle", 0.075); if (!night) renderTone(ctx, ctx.destination, t, m + 12, 0.35, "sine", 0.012) } });
-  }
-  const p = ctx.startRendering();
-  return (p && p.then ? p : new Promise(res => { ctx.oncomplete = e => res(e.renderedBuffer) })).then(wavUrl).catch(() => null);
-}
-renderSong(false).then(u => { BGM.chipUrl[0] = u; musicSync(); return renderSong(true) }).then(u => { BGM.chipUrl[1] = u; musicSync() });
+/* The waltz is a real audio file in the site (audio/*.m4a, rendered from SONG), looped by an <audio> element that
+   lives in the page. That is the most dependable way to get sound in an iPhone home-screen app. */
+const BGM = { el: null, chipUrl: ["audio/b612-waltz.m4a", "audio/b612-waltz-night.m4a"], blob: null, customUrl: null, night: false, ducked: false, err: "" };
 function customReady() { return S.settings.musicSrc === "custom" && BGM.blob }
 function musicWanted() { return S.settings.music && audioUnlocked && !document.hidden && view !== "learn" && view !== "quiz" }
 function musicSync() {
   BGM.night = !!(S.today && skyStage() === 3);
-  if (!BGM.el) { BGM.el = new Audio(); BGM.el.loop = true; BGM.el.setAttribute("playsinline", ""); BGM.el.preload = "auto" }
+  if (!BGM.el) {
+    BGM.el = document.createElement("audio"); BGM.el.loop = true; BGM.el.preload = "auto";
+    BGM.el.setAttribute("playsinline", ""); BGM.el.setAttribute("webkit-playsinline", ""); BGM.el.hidden = true;
+    BGM.el.addEventListener("error", () => { BGM.err = "音樂檔載入失敗（錯誤碼 " + (BGM.el.error ? BGM.el.error.code : "?") + "）" });
+    BGM.el.addEventListener("playing", () => { BGM.err = "" });
+    document.body.appendChild(BGM.el);
+  }
   const el = BGM.el;
   if (customReady() && !BGM.customUrl) BGM.customUrl = URL.createObjectURL(BGM.blob);
   const src = customReady() ? BGM.customUrl : (BGM.chipUrl[BGM.night ? 1 : 0] || BGM.chipUrl[0]);
   if (musicWanted() && src) {
     if (el.dataset.src !== src) { el.src = src; el.dataset.src = src }
     el.volume = Math.min(1, S.settings.musicVol * (BGM.ducked ? 0.3 : 1));
-    if (el.paused) el.play().catch(() => { });
+    if (el.paused) { const p = el.play(); if (p) p.catch(e => { BGM.err = "播放被擋下：" + (e && e.name || "未知") }) }
   } else if (!el.paused) el.pause();
   const mb = document.getElementById("mbtn"); if (mb) { mb.classList.toggle("off", !S.settings.music); mb.setAttribute("aria-pressed", String(S.settings.music)) }
+}
+function musicStatus() {
+  if (!S.settings.music) return "背景音樂已關閉";
+  if (BGM.err) return BGM.err;
+  if (BGM.el && !BGM.el.paused) return "播放中 ♪";
+  return audioUnlocked ? "暫停中" : "點一下畫面後開始";
 }
 function musicDuck(on) { BGM.ducked = on; if (BGM.el) BGM.el.volume = Math.min(1, S.settings.musicVol * (on ? 0.3 : 1)) }
 function idb() { return new Promise((res, rej) => { const r = indexedDB.open("b612", 1); r.onupgradeneeded = () => r.result.createObjectStore("files"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) }) }
@@ -738,10 +752,10 @@ function renderQuiz() {
 }
 function applySRS(id, ok) {
   const mode = SES.mode[id], x = ws(id), t = today();
-  if (mode === "new") { setWs(id, { seen: true, s: ok ? 1 : 0, due: clampDue(t + 1), wr: x.wr + (ok ? 0 : 1) }); return }
-  if (mode === "practice") { if (!ok) setWs(id, { wr: x.wr + 1, due: Math.min(x.due, clampDue(t + 1)) }); return }
-  if (ok) { const ns = Math.min(x.s + 1, 5); if (ns >= STAR_STAGE && x.s < STAR_STAGE) SES.newStars++; setWs(id, { s: ns, due: clampDue(t + INTERVALS[ns]) }) }
-  else setWs(id, { s: 0, due: clampDue(t + 1), wr: x.wr + 1 });
+  if (mode === "new") { setWs(id, { t: Date.now(), seen: true, s: ok ? 1 : 0, due: clampDue(t + 1), wr: x.wr + (ok ? 0 : 1) }); return }
+  if (mode === "practice") { if (!ok) setWs(id, { t: Date.now(), wr: x.wr + 1, due: Math.min(x.due, clampDue(t + 1)) }); return }
+  if (ok) { const ns = Math.min(x.s + 1, 5); if (ns >= STAR_STAGE && x.s < STAR_STAGE) SES.newStars++; setWs(id, { t: Date.now(), s: ns, due: clampDue(t + INTERVALS[ns]) }) }
+  else setWs(id, { t: Date.now(), s: 0, due: clampDue(t + 1), wr: x.wr + 1 });
 }
 function answer(i) {
   if (SES.answered) return; SES.answered = true;
@@ -939,6 +953,7 @@ function renderSettings() {
     <div class="row" style="justify-content:flex-start;flex-wrap:wrap"><label class="btn small" for="mfile" style="display:inline-block;cursor:pointer">選擇手機裡的音樂檔</label>
       <input type="file" id="mfile" accept="audio/*" hidden>
       ${st.musicName ? `<button class="btn small" id="mdel">移除我的音樂</button>` : ""}</div>
+    <div class="row" style="justify-content:flex-start;gap:10px;flex-wrap:wrap"><button class="btn small" id="mtest">▶ 試播音樂</button><span class="note" id="mstat">${musicStatus()}</span></div>
     <p class="note">音樂檔只存在這支手機的 B612 裡，不會上傳。要用買斷的歌（例如 iTunes 購買）或一般音樂檔；Apple Music、Spotify 的串流歌曲沒辦法選。</p>
   </section>
   <section class="sect">
@@ -989,6 +1004,11 @@ function renderSettings() {
   </section>`;
   const $ = id => document.getElementById(id);
   $("back").onclick = () => { confirmReset = false; go("home") };
+  $("mtest").onclick = () => {
+    st.music = true; save(); audioUnlocked = true; musicSync();
+    const el = BGM.el; if (el && el.paused) el.play().catch(e => { BGM.err = "播放被擋下：" + (e && e.name || "未知") });
+    setTimeout(() => { const m = $("mstat"); if (m) m.textContent = musicStatus() }, 800);
+  };
   $("mus").onchange = e => { st.music = e.target.checked; save(); unlockAudio(); musicSync() };
   $("mvol").oninput = e => { st.musicVol = +e.target.value; musicSync() };
   $("mvol").onchange = () => save();
