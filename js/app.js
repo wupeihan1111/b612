@@ -2,7 +2,11 @@
 "use strict";
 
 /* ---------- 題庫 ---------- */
-const DECKS = window.B612_DECKS || [];
+// Book units first (your handwritten Day 1–2), then the extra topic units, then the movie bonus unit.
+const DECKS = (() => {
+  const base = window.B612_DECKS || [], more = window.B612_DECKS_MORE || [];
+  return [...base.filter(d => d.id !== "d0"), ...more, ...base.filter(d => d.id === "d0")];
+})();
 const seenWords = new Set();
 const BOOK_WORDS = DECKS.flatMap(d => d.words.map((a, i) => ({
   id: d.id + "-" + (i + 1), deck: d.id, w: a[0], pos: a[1], zh: a[2], ex: a[3], exZh: a[4], tip: a[5], hook: a[6]
@@ -106,17 +110,34 @@ document.addEventListener("pointerdown", () => {
   try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u) } catch (e) { }
 }, { capture: true });
 
+/* Sound effects (Web Audio). iOS starts the audio engine suspended, re-suspends it ("interrupted") after the app
+   goes to the background, and mutes it with the silent switch, so: unlock on every tap, resume before each sound,
+   and ask for a "playback" audio session where Safari supports it. */
 let AC = null;
+try { if (navigator.audioSession) navigator.audioSession.type = "playback" } catch (e) { }
+function audio() {
+  try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); if (AC.state !== "running") AC.resume().catch(() => { }) } catch (e) { }
+  return AC;
+}
+function unlockAudio() {
+  const ac = audio(); if (!ac) return;
+  try { const s = ac.createBufferSource(); s.buffer = ac.createBuffer(1, 1, 22050); s.connect(ac.destination); s.start(0) } catch (e) { }
+}
+["touchend", "pointerup", "click", "keydown"].forEach(ev => document.addEventListener(ev, unlockAudio, { capture: true, passive: true }));
+document.addEventListener("visibilitychange", () => { if (!document.hidden && AC && AC.state !== "running") AC.resume().catch(() => { }) });
+function whenAudio(fn) {
+  const ac = audio(); if (!ac) return;
+  if (ac.state === "running") fn(ac); else ac.resume().then(() => fn(ac)).catch(() => { });
+}
 function blip(ok) {
+  if (!ok && navigator.vibrate && navigator.userActivation?.hasBeenActive) navigator.vibrate(60);
   if (!S.settings.sfx) return;
-  try {
-    AC = AC || new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === "suspended") AC.resume();
-    const o = AC.createOscillator(), g = AC.createGain(); o.type = "square";
-    const t = AC.currentTime; const n = ok ? [660, 880] : [220, 165];
+  whenAudio(ac => {
+    const o = ac.createOscillator(), g = ac.createGain(); o.type = "square";
+    const t = ac.currentTime + 0.01; const n = ok ? [660, 880] : [220, 165];
     o.frequency.setValueAtTime(n[0], t); o.frequency.setValueAtTime(n[1], t + .08);
-    g.gain.setValueAtTime(.05, t); g.gain.exponentialRampToValueAtTime(.001, t + .22); o.connect(g).connect(AC.destination); o.start(t); o.stop(t + .23)
-  } catch (e) { }
-  if (!ok && navigator.vibrate) navigator.vibrate(60);
+    g.gain.setValueAtTime(.05, t); g.gain.exponentialRampToValueAtTime(.001, t + .22); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + .23);
+  });
 }
 
 /* ---------- 像素圖 ---------- */
@@ -239,17 +260,16 @@ function drawJourney(cv, frac, tick) {
 const PRINCE_LINES = ["你好呀！", "今天也要清火山喔", "我的玫瑰在等我", "Bonjour!", "你看，星星又多一顆了", "往右邊走走看？", "猴麵包樹要趁小拔掉", "我們一起去地球吧", "嘿嘿", "今天想看夕陽"];
 function babble(n) {
   if (!S.settings.sfx) return;
-  try {
-    AC = AC || new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === "suspended") AC.resume();
-    const t0 = AC.currentTime, base = 900 + Math.random() * 200;
+  whenAudio(ac => {
+    const t0 = ac.currentTime + 0.02, base = 900 + Math.random() * 200;
     for (let i = 0; i < Math.min(n, 9); i++) {
-      const o = AC.createOscillator(), g = AC.createGain(), t = t0 + i * 0.075;
+      const o = ac.createOscillator(), g = ac.createGain(), t = t0 + i * 0.075;
       o.type = "triangle"; o.frequency.setValueAtTime(base * (0.85 + Math.random() * 0.45), t);
       o.frequency.exponentialRampToValueAtTime(base * 1.3, t + 0.05);
-      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.09, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
-      o.connect(g).connect(AC.destination); o.start(t); o.stop(t + 0.07);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+      o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.07);
     }
-  } catch (e) { }
+  });
 }
 function princeTalk(bubble) {
   const line = PRINCE_LINES[Math.floor(Math.random() * PRINCE_LINES.length)];
@@ -590,7 +610,7 @@ function renderSettings() {
     <label for="rate">語速 <span class="en" id="rateV">${st.rate.toFixed(2)}x</span>
       <input type="range" id="rate" min="0.6" max="1.2" step="0.05" value="${st.rate}"></label>
     <div class="row"><button class="btn small" id="test">試聽 negotiate</button>
-      <label style="flex-direction:row;align-items:center;gap:8px" for="sfx"><input type="checkbox" id="sfx" ${st.sfx ? "checked" : ""}> 答題音效</label></div>
+      <label style="flex-direction:row;align-items:center;gap:8px" for="sfx"><input type="checkbox" id="sfx" ${st.sfx ? "checked" : ""}> 音效（答題、小王子說話）</label></div>
     <p class="note">聽不到聲音？iPhone 請先關掉側邊的靜音開關。</p>
   </section>
   <section class="sect">
