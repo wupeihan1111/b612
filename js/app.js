@@ -1,6 +1,6 @@
 /* B612 單字星球 — game logic. Progress lives in this browser's localStorage, with a backup code in Settings. */
 "use strict";
-const APP_VERSION = "2026-11-27 · 背景音樂版";   // shown in Settings so you can tell which version the phone is running
+const APP_VERSION = "2026-11-27 · 備份提醒版";   // shown in Settings so you can tell which version the phone is running
 
 /* ---------- 題庫 ---------- */
 // Book units first (your handwritten Day 1–2), then the extra topic units, then the movie bonus unit.
@@ -65,7 +65,11 @@ function exportCode() { return btoa(unescape(encodeURIComponent(JSON.stringify(S
 function importCode(code) {
   const o = JSON.parse(decodeURIComponent(escape(atob(code.trim()))));
   if (!o || typeof o !== "object" || !o.words) throw new Error("bad");
-  S = Object.assign(fresh(), o, { settings: Object.assign(fresh().settings, o.settings) }); save();
+  // Sound settings belong to this phone (its voices, its music file), so a backup from elsewhere keeps them as they are here.
+  const local = S.settings, keep = ["music", "musicVol", "musicSrc", "musicName", "voice", "rate", "sfx"];
+  const settings = Object.assign(fresh().settings, o.settings);
+  keep.forEach(k => settings[k] = local[k]);
+  S = Object.assign(fresh(), o, { settings, installHidden: S.installHidden }); S.lastBackup = Date.now(); save();
 }
 
 /* ---------- 單字與記憶狀態 ---------- */
@@ -144,13 +148,24 @@ function audio() {
   return AC;
 }
 let audioUnlocked = false;
+function rebuildAudio() {
+  // iPhone sometimes leaves the audio engine stuck "interrupted" after switching apps; start a fresh one.
+  try { clearInterval(BGM.timer); BGM.timer = null; if (BGM.el) BGM.el.pause(); AC && AC.close() } catch (e) { }
+  AC = null; BGM.bus = BGM.duck = BGM.el = BGM.src = null; BGM.playing = null; if (BGM.url) { URL.revokeObjectURL(BGM.url); BGM.url = null }
+  audio(); musicSync();
+}
 function unlockAudio() {
   const ac = audio(); if (!ac) return;
   if (!audioUnlocked) { audioUnlocked = true; setTimeout(musicSync, 0) }
+  if (ac.state !== "running") ac.resume().then(() => { if (ac.state === "running") musicSync() }).catch(() => { }).finally(() => setTimeout(() => { if (AC === ac && ac.state !== "running") rebuildAudio() }, 400));
   try { const s = ac.createBufferSource(); s.buffer = ac.createBuffer(1, 1, 22050); s.connect(ac.destination); s.start(0) } catch (e) { }
 }
 ["touchend", "pointerup", "click", "keydown"].forEach(ev => document.addEventListener(ev, unlockAudio, { capture: true, passive: true }));
-document.addEventListener("visibilitychange", () => { if (!document.hidden && AC && AC.state !== "running") AC.resume().catch(() => { }); musicSync() });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { musicSync(); return }
+  if (AC && AC.state !== "running") AC.resume().then(musicSync).catch(() => { });
+  musicSync();
+});
 
 /* ---------- 背景音樂 ----------
    An original 3/4 music-box waltz played on the same Web Audio engine as the sound effects, or a file the player
@@ -534,6 +549,10 @@ function renderHome() {
       <span class="tag clean">加碼</span></button>` : ""}
   </div>
   <p class="note">每座火山每天只能清一次，午夜會重新冒煙；沒清的機會不會留到明天。</p>
+  ${needBackup() ? `<div class="install" id="bk">
+    <div class="row"><b>幫進度拍張照吧</b><button class="btn small" id="bkCopy">複製備份碼</button></div>
+    <span class="note">進度只存在這支手機的 B612 裡。複製備份碼貼到備忘錄，萬一 App 被刪掉或換手機，到設定貼回來就能還原。</span>
+  </div>` : ""}
   ${showInstall ? `<div class="install">
     <div class="row"><b>把 B612 放到手機主畫面</b><button class="btn small" id="hideInstall" aria-label="不再顯示">✕</button></div>
     <span>iPhone：用 Safari 打開 → 下方「分享」→「加入主畫面」。<br>Android：Chrome 右上角 ⋮ →「加到主畫面」。</span>
@@ -551,6 +570,7 @@ function renderHome() {
   app.querySelectorAll("[data-icon]").forEach(c => { const i = +c.dataset.icon; drawIcon(c, i === 3 ? SPR.tree : i === 2 ? SPR.dead : SPR.volHot, 2) });
   app.querySelectorAll("[data-vol]").forEach(b => b.onclick = () => startSession(+b.dataset.vol));
   app.querySelectorAll("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
+  const bk = document.getElementById("bkCopy"); if (bk) bk.onclick = () => copyBackup(() => renderHome());
   const hi = document.getElementById("hideInstall"); if (hi) hi.onclick = () => { S.installHidden = true; save(); renderHome() };
 }
 
@@ -921,17 +941,22 @@ function renderSettings() {
     });
     save(); byIdCache.clear(); $("imp").value = ""; $("impMsg").textContent = `加入了 ${n} 個新單字，會排進之後的活火山。目前自己加的單字：${S.custom.length} 個`;
   };
-  $("copyCode").onclick = async () => {
-    const code = exportCode();
-    try { await navigator.clipboard.writeText(code); toast("備份碼已複製，貼到備忘錄保存吧") }
-    catch (e) { $("code").value = code; $("code").select(); toast("請手動複製下面框框裡的備份碼") }
-  };
+  $("copyCode").onclick = () => copyBackup(null, $("code"));
   $("restore").onclick = () => { try { importCode($("code").value); byIdCache.clear(); toast("進度已還原"); go("home") } catch (e) { toast("備份碼看起來不完整，請重新複製一次") } };
   if (confirmReset) { $("resetNo").onclick = () => { confirmReset = false; renderSettings() }; $("resetYes").onclick = () => { const keep = S.settings; S = fresh(); S.settings = keep; S.installHidden = true; confirmReset = false; save(); go("home") } }
   else $("reset").onclick = () => { confirmReset = true; renderSettings() };
 }
 
 function noteSvg() { return `<svg width="20" height="20" viewBox="0 0 10 10" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="4" y="1" width="1" height="6"/><rect x="5" y="1" width="3" height="1"/><rect x="7" y="2" width="1" height="4"/><rect x="2" y="6" width="3" height="2"/><rect x="5" y="5" width="3" height="2"/></g><rect class="slash" x="0" y="0" width="1" height="1" fill="none"/></svg>` }
+function needBackup() { return seenCount() > 0 && Date.now() - (S.lastBackup || 0) > 3 * 864e5 }
+async function copyBackup(after, box) {
+  const code = exportCode();
+  try { await navigator.clipboard.writeText(code); S.lastBackup = Date.now(); save(); toast("備份碼已複製，貼到備忘錄保存吧"); after && after() }
+  catch (e) {
+    if (box) { box.value = code; box.select(); toast("請手動複製下面框框裡的備份碼") }
+    else { S.lastBackup = Date.now(); save(); go("settings"); setTimeout(() => { const b = document.getElementById("code"); if (b) { b.value = code; b.select() } toast("請手動複製框框裡的備份碼") }, 50) }
+  }
+}
 function speakerSvg(s = 1) { return `<svg width="${20 * s}" height="${18 * s}" viewBox="0 0 10 9" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="0" y="3" width="2" height="3"/><rect x="2" y="2" width="1" height="5"/><rect x="3" y="1" width="1" height="7"/><rect x="4" y="0" width="1" height="9"/><rect x="6" y="3" width="1" height="3"/><rect x="7" y="2" width="1" height="1"/><rect x="7" y="6" width="1" height="1"/><rect x="8" y="1" width="1" height="1"/><rect x="8" y="7" width="1" height="1"/><rect x="9" y="2" width="1" height="5"/></g></svg>` }
 
 document.addEventListener("visibilitychange", () => { if (!document.hidden && S.today && S.today.day !== today() && (view === "home" || view === "result")) go("home") });
