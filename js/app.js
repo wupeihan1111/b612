@@ -56,7 +56,7 @@ function toast(msg, ms = 2600) { const t = document.getElementById("toast"); t.t
 
 /* ---------- 進度存檔 ---------- */
 const LS = "b612.v2";
-function fresh() { return { v: 2, words: {}, today: null, sunsets: [], visited: [], foxDays: [], landing: null, settings: { perDay: 40, rate: 0.9, voice: "", sfx: true, foxHour: 21 }, custom: [], installHidden: false, updatedAt: 0 } }
+function fresh() { return { v: 2, words: {}, today: null, sunsets: [], visited: [], foxDays: [], landing: null, settings: { perDay: 40, rate: 0.9, voice: "", sfx: true, foxHour: 21, music: true, musicVol: 0.5, musicSrc: "chip", musicName: "" }, custom: [], installHidden: false, updatedAt: 0 } }
 function load() { try { const r = localStorage.getItem(LS); if (r) { const o = JSON.parse(r); return Object.assign(fresh(), o, { settings: Object.assign(fresh().settings, o.settings) }) } } catch (e) { } return fresh() }
 let S = load();
 function save() { S.updatedAt = Date.now(); try { localStorage.setItem(LS, JSON.stringify(S)) } catch (e) { toast("存檔失敗：瀏覽器不允許儲存資料，請關閉無痕模式。") } }
@@ -108,7 +108,7 @@ function pickVoice() {
   return voices.find(v => /en[-_]US/i.test(v.lang) && v.localService) || voices.find(v => /en[-_]US/i.test(v.lang)) || voices[0] || null;
 }
 let speakTimer = null, speakBtn = null, warnedNoVoice = false;
-function markSpeaking(on) { document.querySelectorAll(".speak").forEach(b => b.classList.toggle("on", on)) }
+function markSpeaking(on) { document.querySelectorAll(".speak").forEach(b => b.classList.toggle("on", on)); musicDuck(on) }
 const SAY_AS = { resume: "résumé" };   // words whose plain spelling the voice reads as a different word
 function speak(text, rateMul = 1) {
   text = SAY_AS[text] || text;
@@ -142,12 +142,91 @@ function audio() {
   try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); if (AC.state !== "running") AC.resume().catch(() => { }) } catch (e) { }
   return AC;
 }
+let audioUnlocked = false;
 function unlockAudio() {
   const ac = audio(); if (!ac) return;
+  if (!audioUnlocked) { audioUnlocked = true; setTimeout(musicSync, 0) }
   try { const s = ac.createBufferSource(); s.buffer = ac.createBuffer(1, 1, 22050); s.connect(ac.destination); s.start(0) } catch (e) { }
 }
 ["touchend", "pointerup", "click", "keydown"].forEach(ev => document.addEventListener(ev, unlockAudio, { capture: true, passive: true }));
-document.addEventListener("visibilitychange", () => { if (!document.hidden && AC && AC.state !== "running") AC.resume().catch(() => { }) });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && AC && AC.state !== "running") AC.resume().catch(() => { }); musicSync() });
+
+/* ---------- 背景音樂 ----------
+   An original 3/4 music-box waltz played on the same Web Audio engine as the sound effects, or a file the player
+   picked from their own phone (kept in this browser's IndexedDB, never uploaded). Music pauses while learning. */
+const SONG = [   // [bass, chord tones, melody [step, midi, length in eighths]] — 6 eighths per bar, G major
+  [43, [59, 62], [[0, 74, 2], [2, 71, 1], [3, 74, 1], [4, 79, 2]]],
+  [40, [59, 64], [[0, 78, 2], [2, 76, 1], [3, 74, 1], [4, 71, 2]]],
+  [48, [60, 64], [[0, 72, 2], [2, 76, 2], [4, 79, 2]]],
+  [50, [62, 66], [[0, 78, 3], [3, 76, 1], [4, 74, 2]]],
+  [43, [59, 62], [[0, 74, 2], [2, 71, 1], [3, 74, 1], [4, 83, 2]]],
+  [40, [59, 64], [[0, 81, 2], [2, 79, 1], [3, 78, 1], [4, 76, 2]]],
+  [45, [60, 64], [[0, 72, 1], [1, 76, 1], [2, 81, 2], [4, 79, 1], [5, 76, 1]]],
+  [50, [62, 66], [[0, 78, 4], [4, 81, 2]]],
+  [40, [59, 64], [[0, 79, 2], [2, 78, 1], [3, 76, 1], [4, 71, 2]]],
+  [48, [60, 64], [[0, 72, 2], [2, 74, 1], [3, 76, 1], [4, 79, 2]]],
+  [43, [59, 62], [[0, 79, 1], [1, 78, 1], [2, 79, 2], [4, 83, 2]]],
+  [50, [62, 66], [[0, 81, 3], [3, 78, 1], [4, 74, 2]]],
+  [48, [60, 64], [[0, 76, 2], [2, 79, 2], [4, 84, 2]]],
+  [50, [62, 66], [[0, 83, 2], [2, 81, 2], [4, 78, 2]]],
+  [43, [59, 62], [[0, 79, 6]]],
+  [43, [59, 62], [[2, 71, 1], [3, 74, 1], [4, 79, 2]]],
+];
+const BGM = { bus: null, duck: null, timer: null, step: 0, next: 0, playing: null, el: null, src: null, blob: null, url: null, night: false };
+function musicBus() {
+  const ac = audio(); if (!ac) return null;
+  if (!BGM.bus) { BGM.duck = ac.createGain(); BGM.duck.connect(ac.destination); BGM.bus = ac.createGain(); BGM.bus.gain.value = 0; BGM.bus.connect(BGM.duck) }
+  return BGM.bus;
+}
+function tone(ac, t, midi, dur, type, gain) {
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(440 * Math.pow(2, (midi - 69) / 12), t);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(BGM.bus); o.start(t); o.stop(t + dur + 0.05);
+}
+function chipStep(ac, i, t, sd) {
+  const [bass, chord, mel] = SONG[Math.floor(i / 6) % SONG.length], s = i % 6;
+  if (s === 0) tone(ac, t, bass, sd * 5, "triangle", 0.08);
+  if (!BGM.night && (s === 2 || s === 4)) chord.forEach(m => tone(ac, t, m, sd * 1.4, "sine", 0.025));
+  mel.forEach(([st, m, len]) => { if (st === s) { tone(ac, t, BGM.night ? m - 12 : m, Math.max(0.5, len * sd * 1.6), "triangle", 0.075); if (!BGM.night) tone(ac, t, m + 12, 0.35, "sine", 0.012) } });
+}
+function chipStart() {
+  const ac = audio(); if (!ac || BGM.timer) return;
+  BGM.next = ac.currentTime + 0.1;
+  BGM.timer = setInterval(() => {
+    const sd = BGM.night ? 0.44 : 0.33;
+    while (BGM.next < ac.currentTime + 0.3) { chipStep(ac, BGM.step, BGM.next, sd); BGM.next += sd; BGM.step = (BGM.step + 1) % (SONG.length * 6) }
+  }, 60);
+}
+function chipStop() { clearInterval(BGM.timer); BGM.timer = null }
+function customReady() { return S.settings.musicSrc === "custom" && BGM.blob }
+function customStart() {
+  const ac = audio(); if (!ac) return;
+  if (!BGM.el) { BGM.el = new Audio(); BGM.el.loop = true; BGM.el.setAttribute("playsinline", ""); BGM.src = ac.createMediaElementSource(BGM.el); BGM.src.connect(BGM.bus) }
+  if (!BGM.url) { BGM.url = URL.createObjectURL(BGM.blob); BGM.el.src = BGM.url }
+  BGM.el.play().catch(() => { });
+}
+function musicWanted() { return S.settings.music && audioUnlocked && !document.hidden && view !== "learn" && view !== "quiz" }
+function musicSync() {
+  const ac = audio(); const bus = musicBus(); if (!ac || !bus) return;
+  BGM.night = !!(S.today && skyStage() === 3);
+  const want = musicWanted(), kind = customReady() ? "custom" : "chip";
+  if (want) {
+    if (BGM.playing && BGM.playing !== kind) { BGM.playing === "chip" ? chipStop() : BGM.el && BGM.el.pause() }
+    kind === "chip" ? chipStart() : customStart();
+    BGM.playing = kind;
+    bus.gain.cancelScheduledValues(ac.currentTime); bus.gain.setTargetAtTime(S.settings.musicVol * (kind === "chip" ? 1 : 0.9), ac.currentTime, 0.5);
+  } else if (BGM.playing) {
+    bus.gain.cancelScheduledValues(ac.currentTime); bus.gain.setTargetAtTime(0, ac.currentTime, 0.25);
+    const was = BGM.playing; BGM.playing = null;
+    setTimeout(() => { if (BGM.playing) return; was === "chip" ? chipStop() : BGM.el && BGM.el.pause() }, 1200);
+  }
+  const mb = document.getElementById("mbtn"); if (mb) { mb.classList.toggle("off", !S.settings.music); mb.setAttribute("aria-pressed", String(S.settings.music)) }
+}
+function musicDuck(on) { if (!BGM.duck || !AC) return; BGM.duck.gain.setTargetAtTime(on ? 0.25 : 1, AC.currentTime, 0.1) }
+function idb() { return new Promise((res, rej) => { const r = indexedDB.open("b612", 1); r.onupgradeneeded = () => r.result.createObjectStore("files"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error) }) }
+function idbDo(mode, fn) { return idb().then(db => new Promise((res, rej) => { const q = fn(db.transaction("files", mode).objectStore("files")); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error) })) }
+if (S.settings.musicName) idbDo("readonly", st => st.get("bgm")).then(b => { if (b) { BGM.blob = b; musicSync() } }).catch(() => { });
 function whenAudio(fn) {
   const ac = audio(); if (!ac) return;
   if (ac.state === "running") fn(ac); else ac.resume().then(() => fn(ac)).catch(() => { });
@@ -370,6 +449,7 @@ function go(v) { view = v; render(); window.scrollTo(0, 0) }
 function render() {
   cancelAnimationFrame(anim); anim = null;
   ensureToday();
+  setTimeout(musicSync, 0);
   ({ home: renderHome, learn: renderLearn, quiz: renderQuiz, result: renderResult, cards: renderCards, settings: renderSettings, planets: renderPlanets, land: renderLand })[view]();
 }
 function skyStage() { return S.today.done.filter(Boolean).length }
@@ -420,7 +500,8 @@ function renderHome() {
   app.innerHTML = `
   <header class="top">
     <div class="logo">B612<small>單字星球 · ${esc(currentDeck())}</small></div>
-    <div class="count">距離多益 1/9<b>${daysLeft()} 天</b></div>
+    <div class="hdr-r"><button class="mbtn ${S.settings.music ? "" : "off"}" id="mbtn" aria-label="背景音樂" aria-pressed="${S.settings.music}">${noteSvg()}</button>
+    <div class="count">距離多益 1/9<b>${daysLeft()} 天</b></div></div>
   </header>
   <div class="stage">
     <canvas class="scene" id="scene" width="${W}" height="${H}" tabindex="0" role="img" aria-label="B612 星球：小王子、玫瑰、三座火山${due ? `和 ${due} 棵猴麵包樹` : ""}，天上有 ${nStars} 顆點亮的星星。左右滑動可以繞著星球走，點一下小王子會說話"></canvas>
@@ -464,6 +545,7 @@ function renderHome() {
   const cv = document.getElementById("scene");
   startAnim(cv, skyStage(), document.getElementById("journey"));
   document.getElementById("journeyBtn").onclick = () => go("planets");
+  document.getElementById("mbtn").onclick = () => { S.settings.music = !S.settings.music; save(); unlockAudio(); musicSync(); toast(S.settings.music ? "背景音樂開啟" : "背景音樂關閉", 1400) };
   bindWalk(cv, document.getElementById("bubble"));
   app.querySelectorAll("[data-icon]").forEach(c => { const i = +c.dataset.icon; drawIcon(c, i === 3 ? SPR.tree : i === 2 ? SPR.dead : SPR.volHot, 2) });
   app.querySelectorAll("[data-vol]").forEach(b => b.onclick = () => startSession(+b.dataset.vol));
@@ -756,6 +838,17 @@ function renderSettings() {
       <select id="foxh">${Array.from({ length: 18 }, (_, i) => i + 6).map(h => `<option value="${h}" ${st.foxHour === h ? "selected" : ""}>${h}:00 – ${h}:59</option>`).join("")}</select></label>
   </section>
   <section class="sect">
+    <h3>背景音樂</h3>
+    <label style="flex-direction:row;align-items:center;gap:8px" for="mus"><input type="checkbox" id="mus" ${st.music ? "checked" : ""}> 播放背景音樂（清火山時會自動暫停）</label>
+    <label for="mvol">音量 <input type="range" id="mvol" min="0.1" max="1" step="0.05" value="${st.musicVol}"></label>
+    <label for="msrc">曲目
+      <select id="msrc"><option value="chip" ${st.musicSrc !== "custom" ? "selected" : ""}>B612 原創小曲（8-bit 音樂盒）</option>${st.musicName ? `<option value="custom" ${st.musicSrc === "custom" ? "selected" : ""}>我的音樂：${esc(st.musicName)}</option>` : ""}</select></label>
+    <div class="row" style="justify-content:flex-start;flex-wrap:wrap"><label class="btn small" for="mfile" style="display:inline-block;cursor:pointer">選擇手機裡的音樂檔</label>
+      <input type="file" id="mfile" accept="audio/*" hidden>
+      ${st.musicName ? `<button class="btn small" id="mdel">移除我的音樂</button>` : ""}</div>
+    <p class="note">音樂檔只存在這支手機的 B612 裡，不會上傳。要用買斷的歌（例如 iTunes 購買）或一般音樂檔；Apple Music、Spotify 的串流歌曲沒辦法選。</p>
+  </section>
+  <section class="sect">
     <h3>發音</h3>
     <label for="voice">聲音
       <select id="voice"><option value="">自動挑選美式發音</option>${voices.map(v => `<option value="${esc(v.name)}" ${st.voice === v.name ? "selected" : ""}>${esc(v.name)} (${esc(v.lang)})</option>`).join("")}</select></label>
@@ -788,6 +881,26 @@ function renderSettings() {
   </section>`;
   const $ = id => document.getElementById(id);
   $("back").onclick = () => { confirmReset = false; go("home") };
+  $("mus").onchange = e => { st.music = e.target.checked; save(); unlockAudio(); musicSync() };
+  $("mvol").oninput = e => { st.musicVol = +e.target.value; musicSync() };
+  $("mvol").onchange = () => save();
+  $("msrc").onchange = e => { st.musicSrc = e.target.value; save(); musicSync() };
+  $("mfile").onchange = async e => {
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    if (f.size > 30 * 1024 * 1024) { toast("檔案太大了，請選 30MB 以下的音樂檔"); return }
+    try {
+      await idbDo("readwrite", s2 => s2.put(f, "bgm"));
+      BGM.blob = f; if (BGM.url) { URL.revokeObjectURL(BGM.url); BGM.url = null }
+      if (BGM.el) { BGM.el.pause(); BGM.el.removeAttribute("src") }
+      st.musicName = f.name.replace(/\.[^.]+$/, ""); st.musicSrc = "custom"; st.music = true; save();
+      toast("已換成你的音樂"); renderSettings(); musicSync();
+    } catch (err) { toast("這個檔案沒辦法存進來，換一個音樂檔試試") }
+  };
+  const md = $("mdel"); if (md) md.onclick = async () => {
+    try { await idbDo("readwrite", s2 => s2.delete("bgm")) } catch (err) { }
+    if (BGM.el) BGM.el.pause(); BGM.blob = null; if (BGM.url) { URL.revokeObjectURL(BGM.url); BGM.url = null }
+    st.musicName = ""; st.musicSrc = "chip"; save(); renderSettings(); musicSync();
+  };
   $("foxh").onchange = e => { st.foxHour = +e.target.value; save(); toast(`狐狸會在 ${st.foxHour}:00 等你`) };
   $("per").onchange = e => { st.perDay = +e.target.value; save(); toast("明天開始，每天 " + st.perDay + " 個新字") };
   $("voice").onchange = e => { st.voice = e.target.value; save(); speak("negotiate") };
@@ -816,6 +929,7 @@ function renderSettings() {
   else $("reset").onclick = () => { confirmReset = true; renderSettings() };
 }
 
+function noteSvg() { return `<svg width="20" height="20" viewBox="0 0 10 10" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="4" y="1" width="1" height="6"/><rect x="5" y="1" width="3" height="1"/><rect x="7" y="2" width="1" height="4"/><rect x="2" y="6" width="3" height="2"/><rect x="5" y="5" width="3" height="2"/></g><rect class="slash" x="0" y="0" width="1" height="1" fill="none"/></svg>` }
 function speakerSvg(s = 1) { return `<svg width="${20 * s}" height="${18 * s}" viewBox="0 0 10 9" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="0" y="3" width="2" height="3"/><rect x="2" y="2" width="1" height="5"/><rect x="3" y="1" width="1" height="7"/><rect x="4" y="0" width="1" height="9"/><rect x="6" y="3" width="1" height="3"/><rect x="7" y="2" width="1" height="1"/><rect x="7" y="6" width="1" height="1"/><rect x="8" y="1" width="1" height="1"/><rect x="8" y="7" width="1" height="1"/><rect x="9" y="2" width="1" height="5"/></g></svg>` }
 
 document.addEventListener("visibilitychange", () => { if (!document.hidden && S.today && S.today.day !== today() && (view === "home" || view === "result")) go("home") });
