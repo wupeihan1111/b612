@@ -3,9 +3,10 @@
 
 /* ---------- 題庫 ---------- */
 const DECKS = window.B612_DECKS || [];
+const seenWords = new Set();
 const BOOK_WORDS = DECKS.flatMap(d => d.words.map((a, i) => ({
   id: d.id + "-" + (i + 1), deck: d.id, w: a[0], pos: a[1], zh: a[2], ex: a[3], exZh: a[4], tip: a[5], hook: a[6]
-})));
+}))).filter(w => { const k = w.w.toLowerCase(); if (seenWords.has(k)) return false; seenWords.add(k); return true });   // a word in two units is taught once
 
 const EXAM = dayNum(new Date(2027, 0, 9));
 const INTERVALS = [1, 1, 3, 7, 14, 30];
@@ -52,10 +53,16 @@ function seenCount() { return ALL().filter(w => ws(w.id).seen).length }
 function stars() { return ALL().filter(w => ws(w.id).s >= STAR_STAGE).length }
 function status(id) { const x = ws(id); if (!x.seen) return ["new", "還沒遇見"]; if (x.due <= today()) return ["baobab", "猴麵包樹"]; if (x.wr >= 3 && x.s < STAR_STAGE) return ["stubborn", "頑固單字"]; if (x.s >= STAR_STAGE) return ["star", "已點亮"]; return ["taming", "馴養中"] }
 function ensureToday() {
-  const t = today();
-  if (S.today && S.today.day === t) return;
-  const per = S.settings.perDay, half = Math.ceil(per / 2);
+  const t = today(), per = S.settings.perDay, half = Math.ceil(per / 2);
   const unseen = ALL().filter(w => !ws(w.id).seen).map(w => w.id);
+  if (S.today && S.today.day === t) {
+    // New units may have been added since this morning: refill any volcano not cleared yet, in book order.
+    const T = S.today;
+    const v1 = T.done[0] ? T.v1 : unseen.slice(0, half);
+    const v2 = T.done[1] ? T.v2 : unseen.filter(id => !v1.includes(id)).slice(0, T.done[0] ? per - half : per - v1.length);
+    if (v1.join() !== T.v1.join() || v2.join() !== T.v2.join()) { T.v1 = v1; T.v2 = v2; save() }
+    return;
+  }
   S.today = { day: t, v1: unseen.slice(0, half), v2: unseen.slice(half, per), done: [false, false, false] };
   save();
 }
@@ -75,12 +82,14 @@ function pickVoice() {
 }
 let speakTimer = null, speakBtn = null, warnedNoVoice = false;
 function markSpeaking(on) { document.querySelectorAll(".speak").forEach(b => b.classList.toggle("on", on)) }
-function speak(text) {
+const SAY_AS = { resume: "résumé" };   // words whose plain spelling the voice reads as a different word
+function speak(text, rateMul = 1) {
+  text = SAY_AS[text] || text;
   const synth = window.speechSynthesis;
   if (!synth) { if (!warnedNoVoice) { warnedNoVoice = true; toast("這個瀏覽器不支援發音，建議用 Safari 或 Chrome 打開。") } return }
   try {
     if (!voices.length) loadVoices();
-    const u = new SpeechSynthesisUtterance(text); u.lang = "en-US"; const v = pickVoice(); if (v) u.voice = v; u.rate = S.settings.rate; u.volume = 1;
+    const u = new SpeechSynthesisUtterance(text); u.lang = "en-US"; const v = pickVoice(); if (v) u.voice = v; u.rate = S.settings.rate * rateMul; u.volume = 1;
     u.onstart = () => markSpeaking(true);
     u.onend = () => markSpeaking(false);
     u.onerror = e => { markSpeaking(false); if (e.error === "not-allowed") toast("點一下喇叭就能聽發音。") };
@@ -409,12 +418,13 @@ function renderLearn() {
     <div class="row"><button class="word" id="w" lang="en">${esc(w.w)}</button><button class="speak" id="say" aria-label="播放發音">${speakerSvg()}</button></div>
     <span class="pos">${esc(w.pos)}</span>
     <p class="zh">${esc(w.zh)}</p>
-    ${w.ex ? `<p class="ex" lang="en">${esc(w.ex)}</p><p class="exzh">${esc(w.exZh)}</p>` : ""}
+    ${exHtml(w)}
     ${w.tip ? `<div class="tip"><span class="lab">記憶小技巧</span>${esc(w.tip)}</div>` : ""}
   </article>
   <button class="btn gold center" id="next">${SES.li < chunk.length - 1 ? "認識了，下一個" : "認識了，開始清火山"}</button>`;
   document.getElementById("say").onclick = () => speak(w.w);
   document.getElementById("w").onclick = () => speak(w.w);
+  bindEx(app);
   document.getElementById("quit").onclick = () => go("home");
   document.getElementById("next").onclick = () => {
     if (SES.li < chunk.length - 1) { SES.li++; renderLearn() }
@@ -491,7 +501,7 @@ function answer(i) {
    <article class="card enter">
      <div class="row"><button class="word" id="w2" lang="en" style="font-size:28px">${esc(w.w)}</button><button class="speak" id="say2" aria-label="播放發音">${speakerSvg()}</button></div>
      <span class="pos">${esc(w.pos)}　<span style="font-family:var(--font-zh);color:var(--ink)">${esc(w.zh)}</span></span>
-     ${w.ex ? `<p class="ex" lang="en">${esc(w.ex)}</p><p class="exzh">${esc(w.exZh)}</p>` : ""}
+     ${exHtml(w)}
      ${showHook ? hookHtml(w) : ""}
      ${w.tip ? `<div class="tip"><span class="lab">記憶小技巧</span>${esc(w.tip)}</div>` : ""}
      ${w.hook && !showHook ? `<p class="note">再錯一次，就會解鎖這個字的電影記憶句。</p>` : ""}
@@ -500,8 +510,11 @@ function answer(i) {
   document.getElementById("say2").onclick = () => speak(w.w);
   document.getElementById("w2").onclick = () => speak(w.w);
   document.getElementById("cont").onclick = nextQ;
+  bindEx(document.getElementById("reveal"));
   document.getElementById("reveal").scrollIntoView({ behavior: "smooth", block: "start" });
 }
+function exHtml(w) { return w.ex ? `<div class="exrow"><p class="ex" lang="en">${esc(w.ex)}</p><button class="speak sm" data-say-ex="${esc(w.id)}" aria-label="播放例句">${speakerSvg()}<span>句子</span></button></div><p class="exzh">${esc(w.exZh)}</p>` : "" }
+function bindEx(root) { root.querySelectorAll("[data-say-ex]").forEach(b => b.onclick = e => { e.stopPropagation(); const w = byId(b.dataset.sayEx); speak(w.ex, 0.92) }) }
 function hookHtml(w) { const h = w.hook; return `<div class="hook"><span class="lab">記憶句 · 頑固單字解鎖</span>${h.q ? `<p class="ex" lang="en">“${esc(h.q)}”</p><span class="note" lang="en">— ${esc(h.src)}${h.zh ? `（${esc(h.zh)}）` : ""}</span>` : `<span class="src" lang="en">${esc(h.src)}</span>${h.zh ? `<span class="note">${esc(h.zh)}</span>` : ""}`}<span>${esc(h.note)}</span></div>` }
 function finishSession() {
   const T = S.today, t = today();
@@ -549,11 +562,12 @@ function renderCards() {
       <div class="wrow" role="button" tabindex="0" data-w="${w.id}" aria-expanded="${open}">
         <div class="row"><span class="w" lang="en">${esc(w.w)}</span><span class="st ${k}">${n}</span></div>
         <div class="row"><span style="font-size:14px">${esc(w.zh)}</span><span class="pips" aria-label="馴養程度 ${x.seen ? x.s : 0}/5">${[1, 2, 3, 4, 5].map(i => `<i class="${x.seen && x.s >= i ? "on" : ""}"></i>`).join("")}</span></div>
-        ${open ? `<div class="detail">${w.ex ? `<p class="ex" lang="en">${esc(w.ex)}</p><p class="exzh">${esc(w.exZh)}</p>` : ""}${w.tip ? `<div class="tip"><span class="lab">記憶小技巧</span>${esc(w.tip)}</div>` : ""}${w.hook ? hookHtml(w) : ""}${x.wr ? `<p class="note">答錯過 ${x.wr} 次</p>` : ""}</div>` : ""}
+        ${open ? `<div class="detail">${exHtml(w)}${w.tip ? `<div class="tip"><span class="lab">記憶小技巧</span>${esc(w.tip)}</div>` : ""}${w.hook ? hookHtml(w) : ""}${x.wr ? `<p class="note">答錯過 ${x.wr} 次</p>` : ""}</div>` : ""}
       </div>`}).join("") : `<p class="note">這裡還沒有單字。</p>`}
   </div>`;
   document.getElementById("back").onclick = () => go("home");
   app.querySelectorAll("[data-f]").forEach(b => b.onclick = () => { colFilter = b.dataset.f; renderCards() });
+  bindEx(app);
   app.querySelectorAll("[data-w]").forEach(el => { const f = () => { const id = el.dataset.w; openWord = openWord === id ? null : id; speak(byId(id).w); renderCards() }; el.onclick = f; el.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); f() } } });
 }
 

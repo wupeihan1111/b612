@@ -6,6 +6,7 @@
   --ink:#f4ecd8; --muted:#aaa8cc; --gold:#f2c14e; --rose:#e0556e; --leaf:#6cbf7a; --ember:#ff8a3d;
   --ok:#7fd08a; --bad:#ff7a7a;
   --font-en:"Pixelify Sans","DotGothic16",ui-monospace,monospace;
+  --font-word:"Nunito","Avenir Next","Helvetica Neue",Arial,sans-serif;   /* clear letterforms for the words themselves (c vs e) */
   --font-zh:"DotGothic16","PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
   color-scheme:dark;
 }
@@ -72,10 +73,10 @@ button{touch-action:manipulation}
 .bar span{position:absolute;inset:0 auto 0 0;background:var(--gold);transition:width .25s steps(6)}
 .combo{font-family:var(--font-en);color:var(--gold);font-size:13px;min-width:3.5em;text-align:right}
 .card{background:var(--panel);border:3px solid var(--line);box-shadow:0 4px 0 var(--line);padding:18px 16px;display:flex;flex-direction:column;gap:10px;min-width:0;position:relative}
-.word{font-family:var(--font-en);font-size:clamp(30px,10vw,42px);font-weight:600;line-height:1.1;word-break:break-word;color:var(--ink);background:none;border:0;padding:0;text-align:left;cursor:pointer}
+.word{font-family:var(--font-word);font-size:clamp(30px,10vw,42px);font-weight:800;line-height:1.1;word-break:break-word;color:var(--ink);background:none;border:0;padding:0;text-align:left;cursor:pointer}
 .pos{font-family:var(--font-en);color:var(--gold);font-size:14px}
 .zh{font-size:21px}
-.ex{font-family:var(--font-en);font-size:16px;color:#dcd6f0}
+.ex{font-family:var(--font-word);font-weight:600;font-size:16px;color:#dcd6f0}
 .exzh{font-size:13px;color:var(--muted)}
 .prompt{font-size:13px;color:var(--muted);letter-spacing:.06em}
 .speak{font:inherit;cursor:pointer;background:var(--panel-hi);color:var(--gold);border:3px solid var(--line);width:52px;height:46px;display:inline-grid;place-items:center;flex:none;box-shadow:0 3px 0 var(--line)}
@@ -86,14 +87,14 @@ button{touch-action:manipulation}
 .row{display:flex;gap:10px;align-items:center;justify-content:space-between;min-width:0}
 .choices{display:flex;flex-direction:column;gap:10px}
 .choices .btn{font-size:17px;padding:14px}
-.choices .btn.en{font-family:var(--font-en);font-size:19px}
+.choices .btn.en{font-family:var(--font-word);font-weight:700;font-size:19px}
 .btn.right{background:#2c6b44;color:#fff}
 .btn.wrong{background:#7a2f3e;color:#fff}
 .tip{border-top:2px dashed #3f4a85;padding-top:10px;font-size:14px;display:flex;flex-direction:column;gap:4px}
 .tip .lab{font-size:12px;color:var(--gold);letter-spacing:.08em}
 .hook{background:#2b1f3f;border:3px solid var(--line);padding:12px;display:flex;flex-direction:column;gap:4px}
 .hook .lab{font-size:12px;color:var(--rose);letter-spacing:.08em}
-.hook .src{font-family:var(--font-en);font-size:18px;color:var(--ink)}
+.hook .src{font-family:var(--font-word);font-weight:700;font-size:18px;color:var(--ink)}
 .center{text-align:center}
 .big-num{font-family:var(--font-en);font-size:40px;color:var(--gold);line-height:1}
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
@@ -112,7 +113,7 @@ button{touch-action:manipulation}
 .tabs .btn.on{background:var(--gold);color:#2a1d08}
 .wrow{background:var(--panel);border:3px solid var(--line);padding:10px 12px;display:flex;flex-direction:column;gap:6px;cursor:pointer;text-align:left;font:inherit;color:inherit;width:100%}
 .wrow:focus-visible{outline:3px solid var(--gold)}
-.wrow .w{font-family:var(--font-en);font-size:19px}
+.wrow .w{font-family:var(--font-word);font-weight:800;font-size:19px}
 .pips{display:flex;gap:3px}
 .pips i{width:9px;height:9px;background:#3a4277;display:block}
 .pips i.on{background:var(--gold)}
@@ -127,3 +128,7 @@ textarea{min-height:110px;font-family:var(--font-en);font-size:14px;resize:verti
 #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));max-width:min(440px,calc(100% - 32px));
   background:#000a;border:3px solid var(--gold);color:var(--ink);padding:10px 14px;font-size:14px;z-index:20}
 @media (prefers-reduced-motion:reduce){.bar span{transition:none}.pop,.enter,.shake,.speak.on{animation:none}}
+.exrow{display:flex;gap:10px;align-items:flex-start;justify-content:space-between}
+.exrow .ex{flex:1;min-width:0}
+.speak.sm{width:auto;height:auto;padding:4px 8px;gap:4px;display:inline-flex;align-items:center;font-size:12px;color:var(--gold);box-shadow:0 2px 0 var(--line)}
+.speak.sm svg{width:14px;height:13px}
